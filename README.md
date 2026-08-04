@@ -71,11 +71,13 @@ npm run dev:admin           # 管理后台: http://localhost:5174
 
 ## 部署到 Railway
 
-1. **创建 PostgreSQL**：Railway 中 Add New → Database → PostgreSQL，记录 `DATABASE_URL` 变量（Railway 自动注入到关联服务）。
-2. **创建 3 个服务**（Add New → Empty Service → 选择本仓库的对应目录）：
-   - `server/`（根目录为仓库根，railway.json 指定 Dockerfile）
-   - `web/`
-   - `admin/`
+1. **创建 PostgreSQL**：Railway 中 Add New → Database → PostgreSQL，`DATABASE_URL` 变量会自动注入到同项目内的服务。
+2. **创建 3 个服务**（Add New → Empty Service → 选择本仓库 `Winster308/game-hanzhan-site`）：
+   - 每个服务创建后，**必须**在 Settings → Source 中把 **Root Directory（根目录）** 设置为对应子目录：
+     - API 服务 → `server/`
+     - 用户端 → `web/`
+     - 管理后台 → `admin/`
+   - Railway 会在该目录中找到 `Dockerfile` 并以该目录为构建上下文（自包含构建，不依赖仓库根）。
 3. **环境变量**（每个服务）：
    - server：`JWT_SECRET`（随机长串）、`ADMIN_PASSWORD`（管理员初始密码）、`BREVO_API_KEY`（可选）、`MAIL_FROM`、`WEB_URL`
    - web：`API_UPSTREAM=http://<api 服务域名>`
@@ -83,7 +85,7 @@ npm run dev:admin           # 管理后台: http://localhost:5174
 4. 为 web / admin 生成域名（Settings → Networking → Generate Domain），为 server 生成域名。
 5. 部署后 API 自动执行迁移与 seed；登录 `<admin域名>` 使用 Winster 账号（`ADMIN_PASSWORD` 值）进入管理后台。
 
-> 注意：服务通过 Dockerfile 构建（根目录 workspaces）。Railway 上选择服务目录时指向 `server`、`web`、`admin` 目录，Dockerfile 路径已在各目录 railway.json 中指定。
+> 注意：三个子包（server / web / admin）互不依赖，各自独立 `npm install` 构建；开发时使用仓库根 workspaces 统一管理。
 
 ## 常见问题
 
