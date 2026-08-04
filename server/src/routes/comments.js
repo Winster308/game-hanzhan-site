@@ -81,7 +81,7 @@ router.post('/games/:id/comments', requireAuth, async (req, res) => {
         [parentId]
       );
       if (!p.length) return res.status(404).json({ error: '要回复的评论不存在' });
-      if (p[0].game_id !== gameId) return res.status(400).json({ error: '评论不属于该游戏' });
+      if (Number(p[0].game_id) !== Number(gameId)) return res.status(400).json({ error: '评论不属于该游戏' });
       parentComment = p[0];
     }
 

@@ -1,4 +1,4 @@
-import { query } from './db.js';
+import { query, queryResult } from './db.js';
 import { notify } from './notify.js';
 
 /** 各成就条件的计数 SQL（$1 = user_id） */
@@ -30,11 +30,12 @@ export async function checkAchievements(userId) {
     if (!sql) continue;
     const rows = await query(sql, [userId]);
     if (rows[0].c >= a.condition_value) {
-      const inserted = await query(
-        'INSERT INTO user_achievements (user_id, achievement_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING id',
+      // user_achievements 无自增 id，用 rowCount 判断是否新插入（ON CONFLICT 防并发重复）
+      const { rowCount } = await queryResult(
+        'INSERT INTO user_achievements (user_id, achievement_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
         [userId, a.id]
       );
-      if (inserted.length) {
+      if (rowCount > 0) {
         newly.push(a);
         await notify(userId, 'achievement', `解锁成就：${a.name}`, `${a.icon} ${a.description}（+${a.exp} 经验）`, '/profile');
       }

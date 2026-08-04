@@ -1,6 +1,9 @@
 import pg from 'pg';
 import { config } from './config.js';
 
+// BIGINT(int8) → Number（避免前端到处遇到字符串数字；计数场景远小于 2^53 安全）
+pg.types.setTypeParser(20, Number);
+
 const pool = new pg.Pool({
   connectionString: config.databaseUrl,
   max: 10,
