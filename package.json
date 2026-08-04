@@ -1,0 +1,20 @@
+{
+  "name": "game-hanzhan-site",
+  "version": "1.0.0",
+  "private": true,
+  "description": "游戏汉化站 - 游戏汉化分享、存档银行、排行榜一站式平台",
+  "workspaces": [
+    "server",
+    "web",
+    "admin"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace server run dev",
+    "dev:web": "npm --workspace web run dev",
+    "dev:admin": "npm --workspace admin run dev",
+    "build": "npm --workspace web run build && npm --workspace admin run build",
+    "start:server": "npm --workspace server run start",
+    "migrate": "npm --workspace server run migrate",
+    "seed": "npm --workspace server run seed"
+  }
+}

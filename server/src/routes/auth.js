@@ -1,0 +1,355 @@
+import { Router } from 'express';
+import { query, withTransaction } from '../db.js';
+import {
+  hashPassword, verifyPassword, signToken, randomToken, getClientIp,
+} from '../auth.js';
+import { config, isAdminUsername } from '../config.js';
+import { sendMail, mailTemplate } from '../mail.js';
+import { loadUser, isBanned, audit } from '../utils.js';
+import { rateLimit } from '../ratelimit.js';
+
+const router = Router();
+
+const USERNAME_RE = /^[\w\u4e00-\u9fa5]{3,32}$/;
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function publicUser(u) {
+  return {
+    id: u.id,
+    username: u.username,
+    email: u.email,
+    role: u.role,
+    email_verified: u.email_verified,
+    theme: u.theme,
+    banned_until: u.banned_until,
+    ban_reason: u.ban_reason,
+    created_at: u.created_at,
+  };
+}
+
+function validatePassword(p) {
+  if (typeof p !== 'string' || p.length < 6 || p.length > 72) {
+    return '密码长度需为 6-72 位';
+  }
+  return null;
+}
+
+/** 生成并发送邮箱验证邮件 */
+async function sendVerifyEmail(user) {
+  const { token, tokenHash } = randomToken();
+  await query(
+    'INSERT INTO email_tokens (user_id, token_hash, kind, expires_at) VALUES ($1,$2,$3, now() + interval \'1 day\')',
+    [user.id, tokenHash, 'verify']
+  );
+  const link = `${config.webUrl}/verify-email?token=${token}`;
+  await sendMail({
+    to: user.email,
+    subject: `【${config.siteName}】邮箱验证`,
+    html: mailTemplate('验证您的邮箱', `<p>您好 <b>${user.username}</b>，请点击下方按钮完成邮箱验证（24 小时内有效）：</p><p><a href="${link}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 22px;border-radius:8px;text-decoration:none">立即验证</a></p><p>如果按钮无法点击，请复制链接：<br><span style="color:#6b7280;word-break:break-all">${link}</span></p>`),
+  });
+}
+
+// ── 注册 ──────────────────────────────────────────────
+router.post('/register', async (req, res) => {
+  try {
+    const { username, email, password } = req.body || {};
+    if (!USERNAME_RE.test(String(username || ''))) {
+      return res.status(400).json({ error: '用户名需为 3-32 位字母/数字/下划线/中文' });
+    }
+    if (isAdminUsername(username)) {
+      return res.status(400).json({ error: '该用户名已被注册' });
+    }
+    if (!EMAIL_RE.test(String(email || ''))) {
+      return res.status(400).json({ error: '邮箱格式不正确' });
+    }
+    const pwdErr = validatePassword(password);
+    if (pwdErr) return res.status(400).json({ error: pwdErr });
+
+    const existing = await query('SELECT id FROM users WHERE lower(username) = lower($1) OR lower(email) = lower($2)', [username, email]);
+    if (existing.length) {
+      const sameName = existing.length && String(existing[0] ? 1 : 1);
+      return res.status(400).json({ error: '用户名或邮箱已被注册' });
+    }
+
+    const passwordHash = await hashPassword(password);
+    const user = await withTransaction(async (client) => {
+      const r = await client.query(
+        'INSERT INTO users (username, email, password_hash) VALUES ($1,$2,$3) RETURNING *',
+        [username, String(email).toLowerCase(), passwordHash]
+      );
+      return r.rows[0];
+    });
+
+    // 发验证邮件（未配置 Brevo 时自动跳过）
+    await sendVerifyEmail(user).catch((err) => console.error('[mail] verify email failed:', err.message));
+
+    res.status(201).json({ user: publicUser(user), token: signToken(user) });
+  } catch (err) {
+    console.error('[auth/register]', err);
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 登录 ──────────────────────────────────────────────
+router.post('/login', async (req, res) => {
+  try {
+    const { account, password } = req.body || {};
+    if (!account || !password) return res.status(400).json({ error: '请输入账号和密码' });
+
+    const ip = getClientIp(req);
+    const rl = rateLimit({ key: `login:${ip}:${account}`, limit: 5, windowMs: 60 * 1000 });
+    if (!rl.allowed) {
+      return res.status(429).json({ error: '尝试过于频繁，请稍后再试' });
+    }
+
+    const rows = await query(
+      'SELECT * FROM users WHERE lower(username) = lower($1) OR lower(email) = lower($1)',
+      [String(account).trim()]
+    );
+    const user = rows[0];
+    if (!user || !(await verifyPassword(password, user.password_hash))) {
+      if (user) {
+        await query('INSERT INTO login_logs (user_id, ip, user_agent, success) VALUES ($1,$2,$3,FALSE)',
+          [user.id, ip, (req.headers['user-agent'] || '').slice(0, 300)]);
+      }
+      return res.status(401).json({ error: '账号或密码错误' });
+    }
+
+    // 封禁检查
+    const ban = await isBanned(user.id);
+    if (ban.banned) {
+      return res.status(403).json({
+        error: '账号已被封禁',
+        ban_reason: ban.reason,
+        ban_remaining_ms: ban.remainingMs,
+      });
+    }
+
+    await query(
+      'INSERT INTO login_logs (user_id, ip, user_agent, success) VALUES ($1,$2,$3,TRUE)',
+      [user.id, ip, (req.headers['user-agent'] || '').slice(0, 300)]
+    );
+    await query('UPDATE users SET updated_at = now() WHERE id = $1', [user.id]);
+
+    res.json({ user: publicUser(user), token: signToken(user) });
+  } catch (err) {
+    console.error('[auth/login]', err);
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 当前用户 ──────────────────────────────────────────
+router.get('/me', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '未登录' });
+    const user = await loadUser(req.user.id);
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+    res.json({ user: publicUser(user) });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 邮箱验证 ──────────────────────────────────────────
+router.post('/verify-email', async (req, res) => {
+  try {
+    const { token } = req.body || {};
+    if (!token) return res.status(400).json({ error: '缺少令牌' });
+    const tokenHash = require('node:crypto').createHash('sha256').update(token).digest('hex');
+    const rows = await query(
+      `SELECT t.*, u.username, u.email FROM email_tokens t
+       JOIN users u ON u.id = t.user_id
+       WHERE t.token_hash = $1 AND t.kind = 'verify' AND t.used = FALSE AND t.expires_at > now()`,
+      [tokenHash]
+    );
+    if (!rows.length) return res.status(400).json({ error: '验证链接无效或已过期' });
+    await withTransaction(async (client) => {
+      await client.query('UPDATE email_tokens SET used = TRUE WHERE id = $1', [rows[0].id]);
+      await client.query('UPDATE users SET email_verified = TRUE WHERE id = $1', [rows[0].user_id]);
+    });
+    res.json({ ok: true, message: '邮箱验证成功' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 重新发送验证邮件 ──────────────────────────────────
+router.post('/resend-verify', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+    const user = await loadUser(req.user.id);
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+    if (user.email_verified) return res.json({ ok: true, message: '邮箱已验证' });
+    await sendVerifyEmail(user).catch((err) => console.error('[mail] resend failed:', err.message));
+    res.json({ ok: true, message: '验证邮件已发送' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 忘记密码 ──────────────────────────────────────────
+router.post('/forgot-password', async (req, res) => {
+  try {
+    const { email } = req.body || {};
+    if (!email) return res.status(400).json({ error: '请输入邮箱' });
+    const rows = await query('SELECT * FROM users WHERE lower(email) = lower($1)', [email]);
+    if (rows.length) {
+      const user = rows[0];
+      const { token, tokenHash } = randomToken();
+      await query(
+        'INSERT INTO email_tokens (user_id, token_hash, kind, expires_at) VALUES ($1,$2,$3, now() + interval \'1 hour\')',
+        [user.id, tokenHash, 'reset']
+      );
+      const link = `${config.webUrl}/reset-password?token=${token}`;
+      await sendMail({
+        to: user.email,
+        subject: `【${config.siteName}】重置密码`,
+        html: mailTemplate('重置密码', `<p>您好 <b>${user.username}</b>，请点击下方按钮重置密码（1 小时内有效）：</p><p><a href="${link}" style="display:inline-block;background:#4f46e5;color:#fff;padding:10px 22px;border-radius:8px;text-decoration:none">重置密码</a></p><p>如果按钮无法点击，请复制链接：<br><span style="color:#6b7280;word-break:break-all">${link}</span></p>`),
+      }).catch((err) => console.error('[mail] reset failed:', err.message));
+    }
+    // 无论是否存在都返回成功，防止邮箱枚举
+    res.json({ ok: true, message: '如果该邮箱已注册，重置链接已发送' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 重置密码 ──────────────────────────────────────────
+router.post('/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body || {};
+    const pwdErr = validatePassword(newPassword);
+    if (pwdErr) return res.status(400).json({ error: pwdErr });
+    if (!token) return res.status(400).json({ error: '缺少令牌' });
+    const tokenHash = require('node:crypto').createHash('sha256').update(token).digest('hex');
+    const rows = await query(
+      `SELECT * FROM email_tokens WHERE token_hash = $1 AND kind = 'reset' AND used = FALSE AND expires_at > now()`,
+      [tokenHash]
+    );
+    if (!rows.length) return res.status(400).json({ error: '重置链接无效或已过期' });
+    const passwordHash = await hashPassword(newPassword);
+    await withTransaction(async (client) => {
+      await client.query('UPDATE email_tokens SET used = TRUE WHERE id = $1', [rows[0].id]);
+      await client.query('UPDATE users SET password_hash = $1, last_password_change_at = now() WHERE id = $2',
+        [passwordHash, rows[0].user_id]);
+    });
+    res.json({ ok: true, message: '密码已重置，请重新登录' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 修改密码（登录后，每月一次） ──────────────────────
+router.post('/change-password', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+    const { oldPassword, newPassword } = req.body || {};
+    const pwdErr = validatePassword(newPassword);
+    if (pwdErr) return res.status(400).json({ error: pwdErr });
+    const user = await loadUser(req.user.id);
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+    if (!(await verifyPassword(oldPassword || '', user.password_hash))) {
+      return res.status(400).json({ error: '原密码错误' });
+    }
+    const last = user.last_password_change_at ? new Date(user.last_password_change_at).getTime() : 0;
+    const remaining = last + config.changeCooldownMs - Date.now();
+    if (remaining > 0) {
+      return res.status(400).json({
+        error: `密码每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
+        remaining_ms: remaining,
+      });
+    }
+    const passwordHash = await hashPassword(newPassword);
+    await query('UPDATE users SET password_hash = $1, last_password_change_at = now() WHERE id = $2',
+      [passwordHash, user.id]);
+    res.json({ ok: true, message: '密码修改成功' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 修改邮箱（登录后，每月一次） ──────────────────────
+router.post('/change-email', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+    const { newEmail } = req.body || {};
+    if (!EMAIL_RE.test(String(newEmail || ''))) return res.status(400).json({ error: '邮箱格式不正确' });
+    const user = await loadUser(req.user.id);
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+    const last = user.last_email_change_at ? new Date(user.last_email_change_at).getTime() : 0;
+    const remaining = last + config.changeCooldownMs - Date.now();
+    if (remaining > 0) {
+      return res.status(400).json({
+        error: `邮箱每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
+        remaining_ms: remaining,
+      });
+    }
+    const normalized = String(newEmail).toLowerCase();
+    const dup = await query('SELECT id FROM users WHERE lower(email) = $1 AND id <> $2', [normalized, user.id]);
+    if (dup.length) return res.status(400).json({ error: '该邮箱已被使用' });
+    await query('UPDATE users SET email = $1, last_email_change_at = now(), email_verified = FALSE WHERE id = $2',
+      [normalized, user.id]);
+    // 新邮箱重新验证
+    await sendVerifyEmail({ ...user, email: normalized }).catch((err) => console.error('[mail] change-email failed:', err.message));
+    res.json({ ok: true, message: '邮箱修改成功，验证邮件已发送' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 修改昵称（登录后，每月一次） ──────────────────────
+router.post('/change-username', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+    const { newUsername } = req.body || {};
+    if (!USERNAME_RE.test(String(newUsername || ''))) {
+      return res.status(400).json({ error: '用户名需为 3-32 位字母/数字/下划线/中文' });
+    }
+    if (isAdminUsername(newUsername)) return res.status(400).json({ error: '该用户名已被注册' });
+    const user = await loadUser(req.user.id);
+    if (!user) return res.status(401).json({ error: '账号不存在' });
+    const last = user.last_username_change_at ? new Date(user.last_username_change_at).getTime() : 0;
+    const remaining = last + config.changeCooldownMs - Date.now();
+    if (remaining > 0) {
+      return res.status(400).json({
+        error: `昵称每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
+        remaining_ms: remaining,
+      });
+    }
+    const dup = await query('SELECT id FROM users WHERE lower(username) = $1 AND id <> $2', [String(newUsername).toLowerCase(), user.id]);
+    if (dup.length) return res.status(400).json({ error: '该昵称已被使用' });
+    await query('UPDATE users SET username = $1, last_username_change_at = now() WHERE id = $2', [newUsername, user.id]);
+    res.json({ ok: true, message: '昵称修改成功', username: newUsername });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 主题设置 ──────────────────────────────────────────
+router.put('/theme', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+    const { theme } = req.body || {};
+    if (!['light', 'dark', 'system'].includes(theme)) return res.status(400).json({ error: '主题不合法' });
+    await query('UPDATE users SET theme = $1 WHERE id = $2', [theme, req.user.id]);
+    res.json({ ok: true, theme });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 登录 IP 记录 ──────────────────────────────────────
+router.get('/login-logs', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+    const rows = await query(
+      'SELECT ip, user_agent, success, created_at FROM login_logs WHERE user_id = $1 ORDER BY created_at DESC LIMIT 100',
+      [req.user.id]
+    );
+    res.json({ logs: rows });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+export default router;
