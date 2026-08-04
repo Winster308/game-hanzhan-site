@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { api, formatTime } from '../api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { GameCover } from '../components/GameCard.jsx';
@@ -10,16 +10,20 @@ const TABS = [
   ['comments', '💬 我的评论'],
   ['saves', '💾 我的存档'],
   ['reports', '🚩 我的举报'],
+  ['achievements', '🏆 成就'],
 ];
 
 export default function Profile() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const [tab, setTab] = useState('favorites');
+  const [params] = useSearchParams();
+  const initialTab = TABS.some(([k]) => k === params.get('tab')) ? params.get('tab') : 'favorites';
+  const [tab, setTab] = useState(initialTab);
   const [games, setGames] = useState([]);
   const [saves, setSaves] = useState([]);
   const [reports, setReports] = useState([]);
   const [comments, setComments] = useState([]);
+  const [ach, setAch] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -45,6 +49,7 @@ export default function Profile() {
     if (tab === 'comments') tasks.push(api('/my/comments').then((d) => setComments(d.comments)).catch(() => []));
     if (tab === 'saves') tasks.push(api('/my/saves').then((d) => setSaves(d.saves)).catch(() => []));
     if (tab === 'reports') tasks.push(api('/reports/my').then((d) => setReports(d.reports)).catch(() => []));
+    if (tab === 'achievements') tasks.push(api('/my/achievements').then(setAch).catch(() => {}));
     Promise.all(tasks).then(() => setLoading(false));
   }, [tab, user]);
 
@@ -123,6 +128,7 @@ export default function Profile() {
                 {r.action_note && <p className="small mt8">处理备注：{r.action_note}</p>}
               </div>
             )))}
+            {tab === 'achievements' && <AchievementsView ach={ach} />}
           </>
         )}
       </div>
@@ -132,6 +138,51 @@ export default function Profile() {
 
 function Empty() {
   return <div className="empty">暂无内容</div>;
+}
+
+/** 成就与等级视图 */
+function AchievementsView({ ach }) {
+  if (!ach) return <div className="spin" />;
+  const { level, exp, nextExp, curExp, progress } = ach.level;
+  return (
+    <div>
+      {/* 等级卡片 */}
+      <div className="card" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)', color: '#fff', padding: 20, marginBottom: 16 }}>
+        <div className="flex" style={{ gap: 18, flexWrap: 'wrap' }}>
+          <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'rgba(255,255,255,0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 24, fontWeight: 800 }}>
+            Lv.{level}
+          </div>
+          <div style={{ flex: 1, minWidth: 220 }}>
+            <div className="flex-between">
+              <strong>经验值 {exp}</strong>
+              <span className="small" style={{ opacity: 0.9 }}>距 Lv.{level + 1}：{nextExp - exp} 经验</span>
+            </div>
+            <div className="progress-bar mt8" style={{ background: 'rgba(255,255,255,0.25)' }}>
+              <div style={{ width: `${progress}%`, background: '#fbbf24' }} />
+            </div>
+            <p className="small mt8" style={{ opacity: 0.9 }}>
+              已解锁 {ach.unlocked_count} / {ach.total_count} 个成就
+            </p>
+          </div>
+        </div>
+      </div>
+      {/* 成就墙 */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
+        {ach.achievements.map((a) => (
+          <div key={a.id} className="card" style={{
+            padding: 14, textAlign: 'center', opacity: a.unlocked ? 1 : 0.45,
+            borderColor: a.unlocked ? 'var(--primary)' : undefined,
+          }} title={a.description}>
+            <div style={{ fontSize: 28 }}>{a.unlocked ? a.icon : '🔒'}</div>
+            <div style={{ fontWeight: 700, fontSize: 13, marginTop: 6 }}>{a.name}</div>
+            <div className="small muted" style={{ fontSize: 11, marginTop: 3 }}>{a.description}</div>
+            <div className="small mt8" style={{ color: 'var(--primary)' }}>+{a.exp} 经验</div>
+            {a.unlocked && <div className="small muted mt8" style={{ fontSize: 11 }}>{formatTime(a.earned_at)}</div>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function GameGrid({ games }) {

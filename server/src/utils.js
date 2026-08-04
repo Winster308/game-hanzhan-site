@@ -32,9 +32,11 @@ export async function audit(adminId, action, targetType = null, targetId = null,
 }
 
 /** 记录访问（当天人数统计，按 IP 去重） */
-export async function recordVisit(ip, userId) {
+export async function recordVisit(ip, userId, referer = null) {
   if (!ip) return;
-  await query('INSERT INTO visit_logs (ip, user_id) VALUES ($1, $2)', [ip, userId || null]);
+  await query('INSERT INTO visit_logs (ip, user_id, referer) VALUES ($1, $2, $3)', [
+    ip, userId || null, referer ? String(referer).slice(0, 300) : null,
+  ]);
 }
 
 /** 校验 IP 字符串合法性（辅助） */

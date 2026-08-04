@@ -7,6 +7,7 @@ import { config, isAdminUsername } from '../config.js';
 import { sendMail, mailTemplate } from '../mail.js';
 import { loadUser, isBanned, audit } from '../utils.js';
 import { rateLimit } from '../ratelimit.js';
+import { checkAchievements } from '../achievements.js';
 
 const router = Router();
 
@@ -130,6 +131,9 @@ router.post('/login', async (req, res) => {
       [user.id, ip, (req.headers['user-agent'] || '').slice(0, 300)]
     );
     await query('UPDATE users SET updated_at = now() WHERE id = $1', [user.id]);
+
+    // 登录成就检查（不阻塞）
+    checkAchievements(user.id).catch(() => {});
 
     res.json({ user: publicUser(user), token: signToken(user) });
   } catch (err) {

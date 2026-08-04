@@ -8,6 +8,7 @@ import Comments from './pages/Comments.jsx';
 import Users from './pages/Users.jsx';
 import Reports from './pages/Reports.jsx';
 import Saves from './pages/Saves.jsx';
+import Appeals from './pages/Appeals.jsx';
 import Announcements from './pages/Announcements.jsx';
 import AuditLogs from './pages/AuditLogs.jsx';
 
@@ -31,6 +32,7 @@ function Layout() {
     ['/admin/comments', '💬', '评论管理'],
     ['/admin/users', '👥', '用户管理'],
     ['/admin/reports', '🚩', '举报审核'],
+    ['/admin/appeals', '🧾', '申诉审核'],
     ['/admin/saves', '💾', '存档审核'],
     ['/admin/announcements', '📢', '公告管理'],
     ['/admin/audit', '📜', '审计日志'],
@@ -58,6 +60,7 @@ function Layout() {
           <Route path="/comments" element={<Comments show={show} />} />
           <Route path="/users" element={<Users show={show} />} />
           <Route path="/reports" element={<Reports show={show} />} />
+          <Route path="/appeals" element={<Appeals show={show} />} />
           <Route path="/saves" element={<Saves show={show} />} />
           <Route path="/announcements" element={<Announcements show={show} />} />
           <Route path="/audit" element={<AuditLogs />} />

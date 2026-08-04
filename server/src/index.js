@@ -4,6 +4,7 @@ import { config } from './config.js';
 import { migrate } from './migrate.js';
 import { authMiddleware, getClientIp } from './auth.js';
 import { recordVisit } from './utils.js';
+import { enrichCountry } from './geo.js';
 
 import authRoutes from './routes/auth.js';
 import gamesRoutes from './routes/games.js';
@@ -12,6 +13,8 @@ import savesRoutes from './routes/saves.js';
 import reportsRoutes from './routes/reports.js';
 import announcementsRoutes from './routes/announcements.js';
 import profileRoutes from './routes/profile.js';
+import notificationsRoutes from './routes/notifications.js';
+import appealsRoutes from './routes/appeals.js';
 import adminRoutes from './routes/admin.js';
 
 const app = express();
@@ -32,9 +35,11 @@ app.use((req, _res, next) => {
 
 app.use(authMiddleware);
 
-// 页面访问统计（用户端每次加载页面调用一次，按 IP 去重）
+// 页面访问统计（用户端每次加载页面调用一次，按 IP 去重；异步补地区信息）
 app.post('/api/visit', (req, res) => {
-  recordVisit(getClientIp(req), req.user?.id || null);
+  const ip = getClientIp(req);
+  recordVisit(ip, req.user?.id || null, req.get('referer') || null);
+  if (ip) enrichCountry(ip).catch(() => {});
   res.json({ ok: true });
 });
 
@@ -45,6 +50,8 @@ app.use('/api', savesRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/announcements', announcementsRoutes);
 app.use('/api/my', profileRoutes);
+app.use('/api/notifications', notificationsRoutes);
+app.use('/api/appeals', appealsRoutes);
 app.use('/api/admin', adminRoutes);
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, name: config.siteName, time: new Date().toISOString() }));

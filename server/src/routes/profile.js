@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth } from '../auth.js';
+import { myAchievements } from '../achievements.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -45,6 +46,15 @@ router.get('/likes', async (req, res) => {
       [req.user.id]
     );
     res.json({ games: rows });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+/** 我的成就与等级 */
+router.get('/achievements', async (req, res) => {
+  try {
+    res.json(await myAchievements(req.user.id));
   } catch (err) {
     res.status(500).json({ error: '服务器错误' });
   }

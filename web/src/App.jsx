@@ -16,6 +16,8 @@ import ResetPassword from './pages/ResetPassword.jsx';
 import VerifyEmail from './pages/VerifyEmail.jsx';
 import Settings from './pages/Settings.jsx';
 import Profile from './pages/Profile.jsx';
+import Notifications from './pages/Notifications.jsx';
+import Appeals from './pages/Appeals.jsx';
 import { reportVisit } from './api.js';
 
 export default function App() {
@@ -42,6 +44,8 @@ export default function App() {
             <Route path="/verify-email" element={<VerifyEmail />} />
             <Route path="/settings" element={<Settings />} />
             <Route path="/profile" element={<Profile />} />
+            <Route path="/notifications" element={<Notifications />} />
+            <Route path="/appeals" element={<Appeals />} />
             <Route path="*" element={<div className="empty">页面不存在</div>} />
           </Routes>
         </div>

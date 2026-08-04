@@ -16,10 +16,13 @@ export default function GameDetail() {
   const navigate = useNavigate();
 
   const [game, setGame] = useState(null);
+  const [updates, setUpdates] = useState([]);
   const [comments, setComments] = useState([]);
   const [commentTotal, setCommentTotal] = useState(0);
   const [commentPage, setCommentPage] = useState(1);
   const [newComment, setNewComment] = useState('');
+  const [replyingTo, setReplyingTo] = useState(null); // {id, username}
+  const [replyContent, setReplyContent] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [editContent, setEditContent] = useState('');
   const [reportTarget, setReportTarget] = useState(null);
@@ -46,6 +49,7 @@ export default function GameDetail() {
         setComments(d.comments);
         setCommentTotal(d.total);
       }),
+      api(`/games/${id}/updates`, { auth: false }).then((d) => setUpdates(d.updates)).catch(() => setUpdates([])),
     ]).catch((e) => show(e.message, 'error'))
       .finally(() => setLoading(false));
   }, [id, user, show]);
@@ -71,6 +75,23 @@ export default function GameDetail() {
     } catch (e) { show(e.message, 'error'); }
   };
 
+  /** 评分（1-5 星，可改） */
+  const rate = async (score) => {
+    if (!user) return navigate('/login');
+    try {
+      const d = await api(`/games/${game.id}/rating`, { method: 'POST', body: { score } });
+      setGame({ ...game, my_rating: d.my_rating, rating_avg: d.rating_avg, rating_count: d.rating_count });
+      show(`已评 ${score} 星`, 'ok');
+    } catch (e) { show(e.message, 'error'); }
+  };
+
+  const clearRating = async () => {
+    try {
+      const d = await api(`/games/${game.id}/rating`, { method: 'DELETE' });
+      setGame({ ...game, my_rating: null, rating_avg: d.rating_avg, rating_count: d.rating_count });
+    } catch (e) { show(e.message, 'error'); }
+  };
+
   /** 点击去玩：上报游玩数并新窗口打开 */
   const play = (url) => {
     api(`/games/${game.id}/play`, { method: 'POST', auth: false }).catch(() => {});
@@ -81,10 +102,16 @@ export default function GameDetail() {
   const submitComment = async (e) => {
     e.preventDefault();
     if (!user) return navigate('/login');
+    const isReply = !!replyingTo;
     try {
-      await api(`/games/${game.id}/comments`, { method: 'POST', body: { content: newComment } });
+      await api(`/games/${game.id}/comments`, {
+        method: 'POST',
+        body: isReply ? { content: replyContent, parent_id: replyingTo.id } : { content: newComment },
+      });
       setNewComment('');
-      show('评论发表成功', 'ok');
+      setReplyContent('');
+      setReplyingTo(null);
+      show(isReply ? '回复成功' : '评论发表成功', 'ok');
       loadGame();
       loadComments();
     } catch (err) { show(err.message, 'error'); }
@@ -122,6 +149,50 @@ export default function GameDetail() {
     } catch (err) { show(err.message, 'error'); }
   };
 
+  const stars = (score) => '★'.repeat(Math.round(score || 0)) + '☆'.repeat(5 - Math.round(score || 0));
+
+  /** 单条评论渲染（含回复列表） */
+  const renderComment = (c, isReply = false) => (
+    <div key={c.id} className="comment-item" style={isReply ? { padding: '10px 0 10px 14px', borderLeft: '2px solid var(--border)', marginLeft: 8 } : {}}>
+      <div className="comment-head">
+        <span className="avatar" style={{ width: 24, height: 24, fontSize: 11 }}>{c.username.slice(0, 1).toUpperCase()}</span>
+        <span className="comment-user" style={{ fontSize: 13 }}>{c.username}</span>
+        <span className="comment-time">{formatTime(c.created_at)}{c.edited_at && ' · 已编辑'}</span>
+      </div>
+      {c.is_deleted ? (
+        <p className="comment-deleted">该评论已被删除</p>
+      ) : editingId === c.id ? (
+        <div className="mt8">
+          <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} style={{ width: '100%' }} />
+          <div className="flex mt8">
+            <button className="btn btn-sm" onClick={() => saveEdit(c.id)}>保存</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => setEditingId(null)}>取消</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <p className="comment-content" style={{ fontSize: 13.5 }}>{c.content}</p>
+          <div className="comment-actions">
+            {user && (
+              <button onClick={() => { setReplyingTo({ id: c.id, username: c.username }); setReplyContent(''); }}>
+                回复
+              </button>
+            )}
+            {user && (user.id === c.user_id || user.role === 'admin') && (
+              <>
+                <button onClick={() => { setEditingId(c.id); setEditContent(c.content); }}>编辑</button>
+                <button onClick={() => deleteComment(c.id)}>删除</button>
+              </>
+            )}
+            {user && user.id !== c.user_id && (
+              <button onClick={() => setReportTarget({ type: 'comment', id: c.id })}>举报</button>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div className="container">
       <div className="card game-detail-hero mt16">
@@ -146,6 +217,27 @@ export default function GameDetail() {
               {game.is_favorited ? '⭐ 已收藏' : '⭐ 收藏'}
             </button>
           </div>
+          {/* 评分区 */}
+          <div className="flex mt16" style={{ gap: 12, flexWrap: 'wrap' }}>
+            <div>
+              <span style={{ color: '#f59e0b', fontSize: 20, letterSpacing: 2 }}>{stars(game.rating_avg)}</span>
+              <span className="small muted"> {game.rating_avg || '暂无'} / 5（{game.rating_count || 0} 人评分）</span>
+            </div>
+            {user && (
+              <div className="flex" style={{ gap: 4 }}>
+                <span className="small muted">我的评分：</span>
+                {[1, 2, 3, 4, 5].map((s) => (
+                  <button key={s} className="btn btn-ghost btn-sm" style={{ padding: '2px 7px' }}
+                    onClick={() => rate(s)} title={`评 ${s} 星`}>
+                    {game.my_rating >= s ? '★' : '☆'}
+                  </button>
+                ))}
+                {game.my_rating && (
+                  <button className="btn btn-ghost btn-sm" style={{ padding: '2px 7px' }} onClick={clearRating}>取消</button>
+                )}
+              </div>
+            )}
+          </div>
           <p className="muted small mt16">原版链接：<a href={game.original_url} target="_blank" rel="noreferrer">{game.original_url}</a></p>
           <p className="muted small">汉化链接：<a href={game.localized_url} target="_blank" rel="noreferrer">{game.localized_url}</a></p>
         </div>
@@ -155,6 +247,22 @@ export default function GameDetail() {
         <h2 className="mb16" style={{ fontSize: 18 }}>游戏简介</h2>
         <p className="game-detail-desc">{game.description}</p>
       </div>
+
+      {/* 更新日志 */}
+      {updates.length > 0 && (
+        <div className="card mt16" style={{ padding: 22 }}>
+          <h2 className="mb16" style={{ fontSize: 18 }}>📦 更新日志</h2>
+          {updates.map((u) => (
+            <div key={u.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
+              <div className="flex-between">
+                <strong><span className="badge badge-blue">{u.version}</span></strong>
+                <span className="small muted">{formatTime(u.created_at)}</span>
+              </div>
+              <p className="small mt8" style={{ whiteSpace: 'pre-wrap', lineHeight: 1.7 }}>{u.content}</p>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* 存档银行 */}
       {game.save_bank_enabled && <SaveBank gameId={game.id} />}
@@ -168,14 +276,23 @@ export default function GameDetail() {
         {user ? (
           <form onSubmit={submitComment} className="mb16">
             <textarea
-              placeholder={`分享你的游戏体验（${3}-${500} 字，每分钟最多 5 条）`}
-              value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
+              placeholder={replyingTo ? `回复 @${replyingTo.username}：` : `分享你的游戏体验（${3}-${500} 字，每分钟最多 5 条）`}
+              value={replyingTo ? replyContent : newComment}
+              onChange={(e) => (replyingTo ? setReplyContent(e.target.value) : setNewComment(e.target.value))}
               style={{ width: '100%', minHeight: 70 }}
             />
             <div className="flex-between mt8">
-              <span className="small muted">{newComment.length}/500</span>
-              <button className="btn btn-sm" disabled={newComment.trim().length < 3}>发表评论</button>
+              <div className="flex">
+                {replyingTo && (
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReplyingTo(null)}>
+                    取消回复 @{replyingTo.username}
+                  </button>
+                )}
+                <span className="small muted">{(replyingTo ? replyContent : newComment).length}/500</span>
+              </div>
+              <button className="btn btn-sm" disabled={(replyingTo ? replyContent : newComment).trim().length < 3}>
+                {replyingTo ? '发表回复' : '发表评论'}
+              </button>
             </div>
           </form>
         ) : (
@@ -185,37 +302,12 @@ export default function GameDetail() {
         )}
 
         {comments.map((c) => (
-          <div className="comment-item" key={c.id}>
-            <div className="comment-head">
-              <span className="avatar" style={{ width: 26, height: 26, fontSize: 12 }}>{c.username.slice(0, 1).toUpperCase()}</span>
-              <span className="comment-user">{c.username}</span>
-              <span className="comment-time">{formatTime(c.created_at)}{c.edited_at && ' · 已编辑'}</span>
-            </div>
-            {c.is_deleted ? (
-              <p className="comment-deleted">该评论已被删除</p>
-            ) : editingId === c.id ? (
-              <div className="mt8">
-                <textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} style={{ width: '100%' }} />
-                <div className="flex mt8">
-                  <button className="btn btn-sm" onClick={() => saveEdit(c.id)}>保存</button>
-                  <button className="btn btn-ghost btn-sm" onClick={() => setEditingId(null)}>取消</button>
-                </div>
+          <div key={c.id}>
+            {renderComment(c)}
+            {c.replies && c.replies.length > 0 && (
+              <div style={{ marginLeft: 18 }}>
+                {c.replies.map((r) => renderComment(r, true))}
               </div>
-            ) : (
-              <>
-                <p className="comment-content">{c.content}</p>
-                <div className="comment-actions">
-                  {user && (user.id === c.user_id || user.role === 'admin') && (
-                    <>
-                      <button onClick={() => { setEditingId(c.id); setEditContent(c.content); }}>编辑</button>
-                      <button onClick={() => deleteComment(c.id)}>删除</button>
-                    </>
-                  )}
-                  {user && user.id !== c.user_id && (
-                    <button onClick={() => setReportTarget({ type: 'comment', id: c.id })}>举报</button>
-                  )}
-                </div>
-              </>
             )}
           </div>
         ))}

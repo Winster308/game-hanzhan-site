@@ -3,6 +3,7 @@ import { query } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { isBanned } from '../utils.js';
 import { config } from '../config.js';
+import { checkAchievements } from '../achievements.js';
 
 const router = Router();
 
@@ -90,6 +91,7 @@ router.post('/games/:id/saves', requireAuth, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5) RETURNING id, title, filename, status, created_at`,
       [gameId, req.user.id, t, c, filename ? String(filename).slice(0, 120) : null]
     );
+    checkAchievements(req.user.id).catch(() => {});
     res.status(201).json({ save: rows[0], message: '存档已提交，等待管理员审核' });
   } catch (err) {
     console.error('[saves/create]', err);

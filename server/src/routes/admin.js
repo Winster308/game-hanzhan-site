@@ -3,6 +3,8 @@ import { query, withTransaction } from '../db.js';
 import { requireAdmin } from '../auth.js';
 import { audit } from '../utils.js';
 import { config } from '../config.js';
+import { notify, notifyAll } from '../notify.js';
+import { checkAchievements } from '../achievements.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -45,6 +47,39 @@ router.get('/stats', async (req, res) => {
        GROUP BY d ORDER BY d`
     );
 
+    // 实时在线：最近 15 分钟去重 IP
+    const online = await query(
+      "SELECT COUNT(DISTINCT ip)::int AS c FROM visit_logs WHERE created_at > now() - interval '15 minutes'"
+    );
+
+    // 今日每小时访问量
+    const hourly = await query(
+      `SELECT extract(hour FROM created_at)::int AS hour, COUNT(*)::int AS visits
+       FROM visit_logs WHERE created_at::date = CURRENT_DATE
+       GROUP BY hour ORDER BY hour`
+    );
+
+    // 地区分布（来自异步 IP 归属增强）
+    const regions = await query(
+      `SELECT COALESCE(country, '未知') AS country, COUNT(DISTINCT ip)::int AS visitors
+       FROM visit_logs WHERE created_at::date = CURRENT_DATE
+       GROUP BY country ORDER BY visitors DESC LIMIT 10`
+    );
+
+    // 热门搜索词（近 7 天）
+    const hotSearches = await query(
+      `SELECT keyword, COUNT(*)::int AS cnt FROM search_logs
+       WHERE created_at > now() - interval '7 days'
+       GROUP BY keyword ORDER BY cnt DESC LIMIT 10`
+    );
+
+    // 来源页 Top（近 7 天）
+    const referers = await query(
+      `SELECT COALESCE(NULLIF(referer, ''), '直接访问') AS ref, COUNT(*)::int AS cnt
+       FROM visit_logs WHERE created_at > now() - interval '7 days'
+       GROUP BY ref ORDER BY cnt DESC LIMIT 8`
+    );
+
     // TOP10 游戏
     const topGames = await query(
       `SELECT id, title, play_count, likes_count, favorites_count, comments_count,
@@ -61,7 +96,12 @@ router.get('/stats', async (req, res) => {
       totals: totals[0],
       pending_reports: pendingReports[0].c,
       pending_saves: pendingSaves[0].c,
+      online_now: online[0].c,
       week,
+      hourly,
+      regions,
+      hot_searches: hotSearches,
+      referers,
       top_games: topGames,
     });
   } catch (err) {
@@ -301,6 +341,13 @@ router.put('/users/:id/ban', async (req, res) => {
       [bannedUntil, r, id]
     );
     await audit(req.user.id, 'user.ban', 'user', id, { username: target[0].username, banned_until: String(bannedUntil), reason: r });
+    notify(
+      id,
+      'user_banned',
+      '账号已被封禁',
+      `原因：${r}${permanent ? '（永久封禁）' : `（${hours} 小时）`}。如有异议可提交申诉。`,
+      '/appeals'
+    );
     res.json({ ok: true, message: `用户 ${target[0].username} 已封禁` });
   } catch (err) {
     console.error('[admin/users/ban]', err);
@@ -315,6 +362,7 @@ router.put('/users/:id/unban', async (req, res) => {
     const rows = await query('UPDATE users SET banned_until = NULL, ban_reason = NULL WHERE id = $1 RETURNING username', [id]);
     if (!rows.length) return res.status(404).json({ error: '用户不存在' });
     await audit(req.user.id, 'user.unban', 'user', id, { username: rows[0].username });
+    notify(id, 'user_unbanned', '账号已解封', '您的账号已解封，欢迎回来！', '/');
     res.json({ ok: true, message: '已解封' });
   } catch (err) {
     res.status(500).json({ error: '服务器错误' });
@@ -446,6 +494,18 @@ router.put('/reports/:id', async (req, res) => {
     });
 
     if (done.error) return res.status(403).json({ error: done.error });
+    // 通知举报人处理结果
+    notify(
+      report.reporter_id,
+      'report_handled',
+      '您的举报已处理',
+      `举报（${report.reason}）${action === 'approve' ? '已确认，感谢您的监督！' : '经核查未构成违规。'}${note ? ` 备注：${note}` : ''}`,
+      '/profile?tab=reports'
+    );
+    if (action === 'approve') {
+      // 举报被采纳成就（可能触发 report_adopted）
+      checkAchievements(report.reporter_id).catch(() => {});
+    }
     res.json({ ok: true, message: done.message });
   } catch (err) {
     console.error('[admin/reports/handle]', err);
@@ -517,6 +577,19 @@ router.put('/saves/:id', async (req, res) => {
         ['rejected', req.user.id, r, id]);
     }
     await audit(req.user.id, `save.${action}`, 'save', id, { reason: reason || null });
+    // 通知上传者 + 成就检查
+    const saveRows = await query('SELECT user_id, title FROM saves WHERE id = $1', [id]);
+    if (saveRows.length) {
+      const uploaderId = saveRows[0].user_id;
+      notify(
+        uploaderId,
+        'save_reviewed',
+        `存档${action === 'approve' ? '已通过' : '已被驳回'}`,
+        `「${saveRows[0].title}」${action === 'approve' ? '已通过审核并公开' : `：${reason || '不符合要求'}`}`,
+        '/profile?tab=saves'
+      );
+      if (action === 'approve') checkAchievements(uploaderId).catch(() => {});
+    }
     res.json({ ok: true, message: action === 'approve' ? '已通过' : '已驳回' });
   } catch (err) {
     res.status(500).json({ error: '服务器错误' });
@@ -550,6 +623,7 @@ router.post('/announcements', async (req, res) => {
       [t, c, Boolean(is_pinned), expires_at ? new Date(expires_at) : null, req.user.id]
     );
     await audit(req.user.id, 'announcement.create', 'announcement', rows[0].id, { title: t });
+    notifyAll('announcement', `新公告：${t}`, c.slice(0, 80), `/announcements/${rows[0].id}`);
     res.status(201).json({ id: rows[0].id, message: '公告已发布' });
   } catch (err) {
     console.error('[admin/announcements/create]', err);
@@ -585,6 +659,134 @@ router.delete('/announcements/:id', async (req, res) => {
     if (!rows.length) return res.status(404).json({ error: '公告不存在' });
     await audit(req.user.id, 'announcement.delete', 'announcement', id, { title: rows[0].title });
     res.json({ ok: true, message: '公告已删除' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ══════════════ 封禁申诉审核 ══════════════
+router.get('/appeals', async (req, res) => {
+  try {
+    const { page, pageSize, offset } = pagination(req);
+    const status = String(req.query.status || 'pending');
+    const conds = [];
+    const params = [];
+    if (['pending', 'approved', 'rejected'].includes(status)) {
+      params.push(status);
+      conds.push(`a.status = $${params.length}`);
+    }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const rows = await query(
+      `SELECT a.id, a.user_id, a.reason, a.status, a.reply, a.created_at, a.handled_at,
+              u.username, u.banned_until, u.ban_reason
+       FROM ban_appeals a JOIN users u ON u.id = a.user_id
+       ${where} ORDER BY a.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, offset]
+    );
+    const total = await query(`SELECT COUNT(*)::int AS c FROM ban_appeals a ${where}`, params);
+    res.json({ appeals: rows, total: total[0].c, page, pageSize });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+/** 处理申诉 { action: 'approve'|'reject', reply } — approve 即解封 */
+router.put('/appeals/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { action, reply } = req.body || {};
+    if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: '操作不合法' });
+    const rows = await query('SELECT * FROM ban_appeals WHERE id = $1 AND status = $2', [id, 'pending']);
+    if (!rows.length) return res.status(404).json({ error: '申诉不存在或已处理' });
+    const appeal = rows[0];
+    const r = String(reply || '').trim();
+
+    await withTransaction(async (client) => {
+      await client.query(
+        'UPDATE ban_appeals SET status = $1, reply = $2, handled_by = $3, handled_at = now() WHERE id = $4',
+        [action === 'approve' ? 'approved' : 'rejected', r, req.user.id, id]
+      );
+      if (action === 'approve') {
+        await client.query('UPDATE users SET banned_until = NULL, ban_reason = NULL WHERE id = $1', [appeal.user_id]);
+      }
+    });
+    await audit(req.user.id, `appeal.${action}`, 'appeal', id, { username: appeal.reason.slice(0, 50), reply: r });
+    notify(
+      appeal.user_id,
+      'appeal_handled',
+      `申诉${action === 'approve' ? '已通过' : '已被驳回'}`,
+      action === 'approve' ? '您的申诉已通过，账号已解封！' : `很遗憾，您的申诉未通过。${r ? ` 回复：${r}` : ''}`,
+      '/appeals'
+    );
+    res.json({ ok: true, message: action === 'approve' ? '已批准并解封' : '已驳回申诉' });
+  } catch (err) {
+    console.error('[admin/appeals/handle]', err);
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ══════════════ 游戏更新日志管理 ══════════════
+router.get('/games/:id/updates', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const rows = await query(
+      'SELECT id, version, content, created_at FROM game_updates WHERE game_id = $1 ORDER BY created_at DESC, id DESC',
+      [id]
+    );
+    res.json({ updates: rows });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+router.post('/games/:id/updates', async (req, res) => {
+  try {
+    const gameId = Number(req.params.id);
+    const { version, content } = req.body || {};
+    const v = String(version || '').trim();
+    const c = String(content || '').trim();
+    if (!v || v.length > 40) return res.status(400).json({ error: '版本号需为 1-40 字' });
+    if (!c || c.length > 5000) return res.status(400).json({ error: '更新内容需为 1-5000 字' });
+    const game = await query('SELECT id FROM games WHERE id = $1', [gameId]);
+    if (!game.length) return res.status(404).json({ error: '游戏不存在' });
+    const rows = await query(
+      'INSERT INTO game_updates (game_id, version, content) VALUES ($1,$2,$3) RETURNING id',
+      [gameId, v, c]
+    );
+    await audit(req.user.id, 'game_update.create', 'game_update', rows[0].id, { game_id: gameId, version: v });
+    res.status(201).json({ id: rows[0].id, message: '更新日志已添加' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+router.put('/updates/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { version, content } = req.body || {};
+    const v = String(version || '').trim();
+    const c = String(content || '').trim();
+    if (!v || v.length > 40) return res.status(400).json({ error: '版本号需为 1-40 字' });
+    if (!c || c.length > 5000) return res.status(400).json({ error: '更新内容需为 1-5000 字' });
+    const rows = await query(
+      'UPDATE game_updates SET version = $1, content = $2 WHERE id = $3 RETURNING id, game_id',
+      [v, c, id]
+    );
+    if (!rows.length) return res.status(404).json({ error: '更新记录不存在' });
+    await audit(req.user.id, 'game_update.update', 'game_update', id, { version: v });
+    res.json({ ok: true, message: '更新日志已修改' });
+  } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+router.delete('/updates/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const rows = await query('DELETE FROM game_updates WHERE id = $1 RETURNING version', [id]);
+    if (!rows.length) return res.status(404).json({ error: '更新记录不存在' });
+    await audit(req.user.id, 'game_update.delete', 'game_update', id, { version: rows[0].version });
+    res.json({ ok: true, message: '更新日志已删除' });
   } catch (err) {
     res.status(500).json({ error: '服务器错误' });
   }

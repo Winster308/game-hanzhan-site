@@ -13,6 +13,9 @@ export default function Dashboard() {
   const maxVisitors = Math.max(1, ...stats.week.map((w) => w.visitors));
   const totalGames = stats.totals.games;
   const maxScore = Math.max(1, ...stats.top_games.map((g) => g.score));
+  const maxHourly = Math.max(1, ...stats.hourly.map((h) => h.visits));
+  const maxRegion = Math.max(1, ...stats.regions.map((r) => r.visitors));
+  const hourlyMap = Array.from({ length: 24 }, (_, i) => stats.hourly.find((h) => h.hour === i)?.visits || 0);
 
   return (
     <div>
@@ -33,6 +36,10 @@ export default function Dashboard() {
         <div className="stat-card">
           <div className="stat-label">昨日访问人数</div>
           <div className="stat-value">{stats.yesterday_visitors}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">实时在线（15 分钟）</div>
+          <div className="stat-value green">{stats.online_now}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">今日注册</div>
@@ -67,6 +74,76 @@ export default function Dashboard() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="card">
+        <h3>今日分时访问量（24 小时）</h3>
+        <div className="bar-chart" style={{ height: 100 }}>
+          {hourlyMap.map((v, h) => (
+            <div key={h} className="bar-col" title={`${h}:00 - ${v} 次`}>
+              <span className="small muted" style={{ fontSize: 10 }}>{v > 0 ? v : ''}</span>
+              <div className="bar" style={{ height: `${(v / maxHourly) * 80}%`, background: v > 0 ? 'linear-gradient(180deg,#38bdf8,#0284c7)' : 'transparent' }} />
+              <span className="bar-label" style={{ fontSize: 10 }}>{h}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <h3>🌍 今日访客地区分布（独立 IP）</h3>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr><th>地区</th><th>访客数</th><th>占比</th></tr>
+            </thead>
+            <tbody>
+              {stats.regions.map((r) => (
+                <tr key={r.country}>
+                  <td style={{ fontWeight: 600 }}>{r.country}</td>
+                  <td>{r.visitors}</td>
+                  <td style={{ width: 200 }}>
+                    <div style={{ height: 7, background: '#e2e8f0', borderRadius: 99, overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${(r.visitors / maxRegion) * 100}%`, background: '#22c55e', borderRadius: 99 }} />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p className="small muted mt8">地区信息由 ip-api.com 异步补充，境外/失败记录显示为"未知"</p>
+      </div>
+
+      <div className="card">
+        <h3>🔍 热门搜索词（近 7 天）</h3>
+        {stats.hot_searches.length === 0 ? <p className="muted small">暂无搜索数据</p> : (
+          <div className="flex" style={{ flexWrap: 'wrap', gap: 10 }}>
+            {stats.hot_searches.map((s, i) => (
+              <span key={s.keyword} className="badge" style={{ background: '#ede9fe', color: '#6d28d9', fontSize: 13, padding: '6px 12px' }}>
+                {i + 1}. {s.keyword} <span className="muted">×{s.cnt}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <h3>🔗 来源 Top（近 7 天）</h3>
+        {stats.referers.length === 0 ? <p className="muted small">暂无数据</p> : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>来源</th><th>次数</th></tr></thead>
+              <tbody>
+                {stats.referers.map((r) => (
+                  <tr key={r.ref}>
+                    <td className="cell-clamp" style={{ maxWidth: 420 }}>{r.ref}</td>
+                    <td>{r.cnt}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       <div className="card">

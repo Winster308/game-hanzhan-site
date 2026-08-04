@@ -78,6 +78,9 @@ export default function Settings() {
           <p className="small mt8">
             原因：{user.ban_reason || '未说明'} · 剩余：{formatRemaining(new Date(user.banned_until).getTime() - Date.now())}
           </p>
+          <button className="btn btn-outline btn-sm mt8" onClick={() => navigate('/appeals')}>
+            提交封禁申诉
+          </button>
         </div>
       )}
 

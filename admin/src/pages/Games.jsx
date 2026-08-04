@@ -16,6 +16,9 @@ export default function Games({ show }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [coverPreview, setCoverPreview] = useState('');
   const [saving, setSaving] = useState(false);
+  // 更新日志管理
+  const [updates, setUpdates] = useState([]);
+  const [updateForm, setUpdateForm] = useState({ version: '', content: '' });
 
   const load = useCallback(() => {
     api(`/admin/games?page=${page}&pageSize=15${search ? `&search=${encodeURIComponent(search)}` : ''}`)
@@ -29,6 +32,7 @@ export default function Games({ show }) {
     if (!g) {
       setForm(EMPTY_FORM);
       setCoverPreview('');
+      setUpdates([]);
       setEditing('new');
       return;
     }
@@ -39,6 +43,9 @@ export default function Games({ show }) {
     });
     setCoverPreview(g.cover_type === 'upload' ? g.cover_data : (g.cover_url || ''));
     setEditing(g);
+    // 加载更新日志
+    api(`/admin/games/${g.id}/updates`).then((d) => setUpdates(d.updates)).catch(() => setUpdates([]));
+    setUpdateForm({ version: '', content: '' });
   };
 
   /** 图片文件 → base64 */
@@ -188,6 +195,65 @@ export default function Games({ show }) {
                 </label>
               </div>
             </div>
+
+            {/* 更新日志管理（仅编辑已有游戏时显示） */}
+            {editing !== 'new' && (
+              <div className="mt16" style={{ borderTop: '1px solid #e2e8f0', paddingTop: 14 }}>
+                <h4 style={{ marginBottom: 10 }}>📦 更新日志管理</h4>
+                <div className="flex" style={{ gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+                  <input placeholder="版本号（如 v1.2.0）" value={updateForm.version}
+                    onChange={(e) => setUpdateForm({ ...updateForm, version: e.target.value })}
+                    style={{ width: 130 }} />
+                  <input placeholder="更新内容（如：修复xxx，新增xxx）" value={updateForm.content}
+                    onChange={(e) => setUpdateForm({ ...updateForm, content: e.target.value })}
+                    style={{ flex: 1, minWidth: 200 }} />
+                  <button type="button" className="btn btn-sm"
+                    onClick={async () => {
+                      if (!updateForm.version.trim() || !updateForm.content.trim()) return show('版本号和内容不能为空', 'error');
+                      try {
+                        await api(`/admin/games/${editing.id}/updates`, {
+                          method: 'POST',
+                          body: { version: updateForm.version, content: updateForm.content },
+                        });
+                        show('更新日志已添加', 'ok');
+                        setUpdateForm({ version: '', content: '' });
+                        const d = await api(`/admin/games/${editing.id}/updates`);
+                        setUpdates(d.updates);
+                      } catch (err) { show(err.message, 'error'); }
+                    }}>
+                    ＋ 添加
+                  </button>
+                </div>
+                {updates.length === 0 ? (
+                  <p className="small muted">暂无更新日志</p>
+                ) : (
+                  <div style={{ maxHeight: 200, overflow: 'auto', border: '1px solid #e2e8f0', borderRadius: 8 }}>
+                    {updates.map((u) => (
+                      <div key={u.id} className="flex-between" style={{ padding: '8px 12px', borderBottom: '1px solid #f1f5f9' }}>
+                        <div style={{ minWidth: 0 }}>
+                          <span className="badge badge-blue">{u.version}</span>
+                          <span className="small muted" style={{ marginLeft: 8 }}>{formatTime(u.created_at)}</span>
+                          <div className="small" style={{
+                            marginTop: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 420,
+                          }}>{u.content}</div>
+                        </div>
+                        <button type="button" className="btn btn-red btn-sm"
+                          onClick={async () => {
+                            if (!window.confirm('删除这条更新日志？')) return;
+                            try {
+                              await api(`/admin/updates/${u.id}`, { method: 'DELETE' });
+                              show('已删除', 'ok');
+                              const d = await api(`/admin/games/${editing.id}/updates`);
+                              setUpdates(d.updates);
+                            } catch (err) { show(err.message, 'error'); }
+                          }}>删除</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="form-actions">
               <button type="button" className="btn btn-ghost" onClick={() => setEditing(null)}>取消</button>
               <button className="btn" disabled={saving}>{saving ? '保存中…' : '保存'}</button>

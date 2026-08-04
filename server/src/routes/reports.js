@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { requireAuth } from '../auth.js';
 import { isBanned } from '../utils.js';
+import { checkAchievements } from '../achievements.js';
 
 const router = Router();
 
@@ -49,6 +50,7 @@ router.post('/', requireAuth, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5) RETURNING id, status, created_at`,
       [req.user.id, targetType, tid, reason, d]
     );
+    checkAchievements(req.user.id).catch(() => {});
     res.status(201).json({ report: rows[0], message: '举报已提交，感谢您的反馈' });
   } catch (err) {
     console.error('[reports/create]', err);
