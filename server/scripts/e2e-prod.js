@@ -42,23 +42,62 @@ async function call(path, { method = 'GET', body, token } = {}) {
   check('详情含评分字段', detail.data.game.rating_avg !== undefined);
 
   console.log('── 5. 注册用户 → 点赞/评论/评分 ──');
-  const reg = await call('/auth/register', { method: 'POST', body: { username: `公网用户${suffix}`, email: `e2e${suffix}@test.com`, password: 'test123456' } });
-  check('注册', reg.status === 201, JSON.stringify(reg.data).slice(0, 120));
-  const ut = reg.data.token;
-  const like = await call(`/games/${gid}/like`, { method: 'POST', token: ut });
-  check('点赞', like.data.liked === true);
-  const cm = await call(`/games/${gid}/comments`, { method: 'POST', token: ut, body: { content: '端到端测试评论内容，验证完整链路！' } });
-  check('评论', cm.status === 201, JSON.stringify(cm.data).slice(0, 100));
-  const rt = await call(`/games/${gid}/rating`, { method: 'POST', token: ut, body: { score: 5 } });
-  check('评分', rt.data.my_rating === 5);
-  const sv = await call(`/games/${gid}/saves`, { method: 'POST', token: ut, body: { title: '测试存档', content: 'save data 123' } });
-  check('上传存档', sv.status === 201, JSON.stringify(sv.data).slice(0, 100));
+  const regEmail = `e2e${suffix}@test.com`;
+  const regUsername = `公网用户${suffix}`;
+  // 注册强制邮箱验证码：先发送验证码，再从数据库读取注入（脚本同时连接生产库时）
+  const sendCode = await call('/auth/send-register-code', { method: 'POST', body: { email: regEmail } });
+  check('发送注册验证码', sendCode.status === 200, JSON.stringify(sendCode.data).slice(0, 120));
+  let regCode = '';
+  if (process.env.E2E_DATABASE_URL) {
+    try {
+      const { default: pg } = await import('pg');
+      const crypto = await import('node:crypto');
+      const client = new pg.Client({ connectionString: process.env.E2E_DATABASE_URL });
+      await client.connect();
+      // 与本地 smoke-test 的 injectCode 一致：置旧验证码失效，插入已知验证码
+      const code = '123456';
+      await client.query("UPDATE email_tokens SET used = TRUE WHERE email = $1 AND kind = 'register'", [regEmail]);
+      await client.query(
+        `INSERT INTO email_tokens (user_id, email, token_hash, kind, expires_at)
+         VALUES (NULL, $1, $2, 'register', now() + interval '10 minutes')`,
+        [regEmail, crypto.createHash('sha256').update(code).digest('hex')]
+      );
+      await client.end();
+      regCode = code;
+    } catch (err) {
+      console.log('  ⚠ 数据库验证码注入失败（跳过注册链路）:', err.message);
+    }
+  } else {
+    console.log('  ⚠ 未配置 E2E_DATABASE_URL，跳过注册链路（注册需邮箱验证码）');
+  }
+  let ut = null;
+  if (regCode) {
+    const reg = await call('/auth/register', { method: 'POST', body: { username: regUsername, email: regEmail, password: 'test123456', code: regCode } });
+    check('注册', reg.status === 201, JSON.stringify(reg.data).slice(0, 120));
+    ut = reg.data.token;
+  } else {
+    console.log('  ⚠ 跳过注册（无法获取验证码）');
+  }
+  if (ut) {
+    const like = await call(`/games/${gid}/like`, { method: 'POST', token: ut });
+    check('点赞', like.data.liked === true);
+    const cm = await call(`/games/${gid}/comments`, { method: 'POST', token: ut, body: { content: '端到端测试评论内容，验证完整链路！' } });
+    check('评论', cm.status === 201, JSON.stringify(cm.data).slice(0, 100));
+    const rt = await call(`/games/${gid}/rating`, { method: 'POST', token: ut, body: { score: 5 } });
+    check('评分', rt.data.my_rating === 5);
+    const sv = await call(`/games/${gid}/saves`, { method: 'POST', token: ut, body: { title: '测试存档', content: 'save data 123' } });
+    check('上传存档', sv.status === 201, JSON.stringify(sv.data).slice(0, 100));
+  }
 
   console.log('── 6. 成就/通知 ──');
-  const ach = await call('/my/achievements', { token: ut });
-  check('成就解锁≥1', ach.data.unlocked_count >= 1, JSON.stringify(ach.data));
-  const unread = await call('/notifications/unread-count', { token: ut });
-  check('通知未读数≥1', unread.data.count >= 1, JSON.stringify(unread.data));
+  if (ut) {
+    const ach = await call('/my/achievements', { token: ut });
+    check('成就解锁≥1', ach.data.unlocked_count >= 1, JSON.stringify(ach.data));
+    const unread = await call('/notifications/unread-count', { token: ut });
+    check('通知未读数≥1', unread.data.count >= 1, JSON.stringify(unread.data));
+  } else {
+    console.log('  ⚠ 跳过成就/通知验证（未注册）');
+  }
 
   console.log('── 7. 管理统计 ──');
   const stats = await call('/admin/stats', { token: adminToken });
