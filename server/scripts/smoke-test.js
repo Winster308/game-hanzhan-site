@@ -1,4 +1,7 @@
 /* 冒烟测试：覆盖核心 API 链路（本地开发数据库） */
+import crypto from 'node:crypto';
+import { query } from '../src/db.js';
+
 const BASE = 'http://localhost:3001/api';
 let pass = 0, fail = 0;
 let userToken = null, adminToken = null, gameId = null, commentId = null, replyId = null, saveId = null, reportId = null, appealId = null;
@@ -17,6 +20,16 @@ function check(name, cond, extra = '') {
   else { fail++; console.log(`  ❌ ${name} ${extra}`); }
 }
 
+/** 本地测试用：直接向数据库插入指定验证码 */
+async function injectCode(email, code) {
+  await query("UPDATE email_tokens SET used = TRUE WHERE email = $1 AND kind = 'register'", [email]);
+  await query(
+    `INSERT INTO email_tokens (user_id, email, token_hash, kind, expires_at)
+     VALUES (NULL, $1, $2, 'register', now() + interval '10 minutes')`,
+    [email, crypto.createHash('sha256').update(code).digest('hex')]
+  );
+}
+
 async function main() {
   const suffix = Date.now().toString(36);
 
@@ -25,8 +38,17 @@ async function main() {
   check('health ok', health.data.ok === true, JSON.stringify(health.data));
 
   console.log('── 2. 注册/登录 ──');
-  const reg = await call('/auth/register', { method: 'POST', body: { username: `测试用户${suffix.slice(-6)}`, email: `t${suffix}@test.com`, password: 'test123456' } });
-  check('注册成功', reg.status === 201, JSON.stringify(reg.data));
+  const regEmail = `t${suffix}@test.com`;
+  // 未带验证码注册 → 必须拒绝
+  const noCode = await call('/auth/register', { method: 'POST', body: { username: `测试用户${suffix.slice(-6)}`, email: regEmail, password: 'test123456' } });
+  check('无验证码注册被拒', noCode.status === 400, JSON.stringify(noCode.data));
+  // 错误验证码 → 拒绝
+  await injectCode(regEmail, '123456');
+  const badCode = await call('/auth/register', { method: 'POST', body: { username: `测试用户${suffix.slice(-6)}`, email: regEmail, password: 'test123456', code: '000000' } });
+  check('错误验证码被拒', badCode.status === 400, JSON.stringify(badCode.data));
+  // 正确验证码 → 注册成功（邮箱已验证）
+  const reg = await call('/auth/register', { method: 'POST', body: { username: `测试用户${suffix.slice(-6)}`, email: regEmail, password: 'test123456', code: '123456' } });
+  check('验证码注册成功', reg.status === 201 && reg.data.user.email_verified === true, JSON.stringify(reg.data).slice(0, 150));
   userToken = reg.data.token;
 
   const regWinster = await call('/auth/register', { method: 'POST', body: { username: 'Winster', email: 'w2@test.com', password: 'test123456' } });

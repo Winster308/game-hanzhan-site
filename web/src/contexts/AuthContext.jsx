@@ -33,8 +33,8 @@ export function AuthProvider({ children }) {
     return data;
   };
 
-  const register = async (username, email, password) => {
-    const data = await api('/auth/register', { method: 'POST', body: { username, email, password } });
+  const register = async (username, email, password, code) => {
+    const data = await api('/auth/register', { method: 'POST', body: { username, email, password, code } });
     setToken(data.token);
     setUser(data.user);
     return data;

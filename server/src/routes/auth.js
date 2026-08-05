@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import {
@@ -13,6 +14,11 @@ const router = Router();
 
 const USERNAME_RE = /^[\w\u4e00-\u9fa5]{3,32}$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const genCode = () => String(crypto.randomInt(0, 1000000)).padStart(6, '0');
+
+/** 生成并发送邮箱验证邮件（改邮箱等场景） */
 
 function publicUser(u) {
   return {
@@ -50,10 +56,50 @@ async function sendVerifyEmail(user) {
   });
 }
 
-// ── 注册 ──────────────────────────────────────────────
+// ── 发送注册邮箱验证码 ────────────────────────────────
+router.post('/send-register-code', async (req, res) => {
+  try {
+    const email = String((req.body || {}).email || '').toLowerCase().trim();
+    if (!EMAIL_RE.test(email)) return res.status(400).json({ error: '邮箱格式不正确' });
+
+    // 防枚举：邮箱已注册时也返回"已发送"（不实际发信）
+    const exists = await query('SELECT id FROM users WHERE lower(email) = $1', [email]);
+    if (exists.length) return res.json({ ok: true, message: '验证码已发送（如邮箱已注册，请直接登录）' });
+
+    // 限流：每邮箱+IP 60 秒最多 1 次
+    const ip = getClientIp(req);
+    const rl = rateLimit({ key: `regcode:${email}:${ip}`, limit: 1, windowMs: 60 * 1000 });
+    if (!rl.allowed) return res.status(429).json({ error: '发送过于频繁，请 60 秒后再试' });
+
+    // 过期旧验证码
+    await query("UPDATE email_tokens SET used = TRUE WHERE email = $1 AND kind = 'register'", [email]);
+
+    const code = genCode();
+    await query(
+      `INSERT INTO email_tokens (user_id, email, token_hash, kind, expires_at)
+       VALUES (NULL, $1, $2, 'register', now() + interval '10 minutes')`,
+      [email, sha256(code)]
+    );
+    await sendMail({
+      to: email,
+      subject: `【${config.siteName}】注册验证码`,
+      html: mailTemplate('注册验证码', `
+        <p>您好！您的注册验证码为：</p>
+        <p style="font-size:32px;font-weight:800;letter-spacing:6px;color:#4f46e5;margin:16px 0">${code}</p>
+        <p>请在注册页面输入以上验证码完成注册，<b>10 分钟内有效</b>。请勿泄露给他人。</p>`),
+    }).catch((err) => console.error('[mail] register code failed:', err.message));
+
+    res.json({ ok: true, message: '验证码已发送到邮箱' });
+  } catch (err) {
+    console.error('[auth/send-register-code]', err);
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 注册（必须邮箱验证码） ─────────────────────────────
 router.post('/register', async (req, res) => {
   try {
-    const { username, email, password } = req.body || {};
+    const { username, email, password, code } = req.body || {};
     if (!USERNAME_RE.test(String(username || ''))) {
       return res.status(400).json({ error: '用户名需为 3-32 位字母/数字/下划线/中文' });
     }
@@ -65,23 +111,33 @@ router.post('/register', async (req, res) => {
     }
     const pwdErr = validatePassword(password);
     if (pwdErr) return res.status(400).json({ error: pwdErr });
+    const normalizedEmail = String(email).toLowerCase().trim();
+    if (!String(code || '').trim()) return res.status(400).json({ error: '请输入邮箱验证码' });
 
-    const existing = await query('SELECT id FROM users WHERE lower(username) = lower($1) OR lower(email) = lower($2)', [username, email]);
-    if (existing.length) {
-      return res.status(400).json({ error: '用户名或邮箱已被注册' });
-    }
+    const existing = await query('SELECT id FROM users WHERE lower(username) = lower($1) OR lower(email) = lower($2)', [username, normalizedEmail]);
+    if (existing.length) return res.status(400).json({ error: '用户名或邮箱已被注册' });
+
+    // 校验验证码（防暴力：每邮箱+IP 30 秒最多 5 次尝试）
+    const ip = getClientIp(req);
+    const rl = rateLimit({ key: `regcode-check:${normalizedEmail}:${ip}`, limit: 5, windowMs: 30 * 1000 });
+    if (!rl.allowed) return res.status(429).json({ error: '验证码尝试过于频繁，请稍后再试' });
+    const codeRows = await query(
+      `SELECT id FROM email_tokens WHERE email = $1 AND kind = 'register' AND token_hash = $2
+       AND used = FALSE AND expires_at > now()`,
+      [normalizedEmail, sha256(String(code).trim())]
+    );
+    if (!codeRows.length) return res.status(400).json({ error: '验证码错误或已过期' });
 
     const passwordHash = await hashPassword(password);
     const user = await withTransaction(async (client) => {
+      // 验证码一次性使用
+      await client.query('UPDATE email_tokens SET used = TRUE WHERE id = $1', [codeRows[0].id]);
       const r = await client.query(
-        'INSERT INTO users (username, email, password_hash) VALUES ($1,$2,$3) RETURNING *',
-        [username, String(email).toLowerCase(), passwordHash]
+        'INSERT INTO users (username, email, password_hash, email_verified) VALUES ($1,$2,$3,TRUE) RETURNING *',
+        [username, normalizedEmail, passwordHash]
       );
       return r.rows[0];
     });
-
-    // 发验证邮件（未配置 Brevo 时自动跳过）
-    await sendVerifyEmail(user).catch((err) => console.error('[mail] verify email failed:', err.message));
 
     res.status(201).json({ user: publicUser(user), token: signToken(user) });
   } catch (err) {
