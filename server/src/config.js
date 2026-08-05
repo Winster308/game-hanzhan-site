@@ -7,7 +7,10 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me-in-production',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
   // 邮件：优先 SMTP（如 QQ 邮箱），其次 Brevo，都不配置则仅打日志
+  // smtpHost 建议直接填 IPv4 地址（Railway 容器 DNS 解析 smtp.qq.com 时 IPv4 记录常缺失，导致只连 IPv6 失败）
   smtpHost: process.env.SMTP_HOST || 'smtp.qq.com',
+  // TLS SNI/证书校验用域名（host 为 IP 时仍按域名校验证书）
+  smtpServername: process.env.SMTP_SERVERNAME || 'smtp.qq.com',
   smtpPort: Number(process.env.SMTP_PORT || 465),
   smtpUser: process.env.SMTP_USER || '',
   smtpPass: process.env.SMTP_PASS || '',
