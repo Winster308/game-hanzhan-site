@@ -80,7 +80,8 @@ router.post('/send-register-code', async (req, res) => {
        VALUES (NULL, $1, $2, 'register', now() + interval '10 minutes')`,
       [email, sha256(code)]
     );
-    await sendMail({
+    // 邮件后台发送（不阻塞接口响应）
+    sendMail({
       to: email,
       subject: `【${config.siteName}】注册验证码`,
       html: mailTemplate('注册验证码', `

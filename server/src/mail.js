@@ -18,13 +18,16 @@ export async function sendMail({ to, subject, html }) {
   return { skipped: true };
 }
 
-/** QQ 邮箱 / 任意 SMTP 发信（TLS 465） */
+/** QQ 邮箱 / 任意 SMTP 发信（TLS 465，带超时防止挂起） */
 async function sendViaSmtp({ to, subject, html }) {
   const transporter = nodemailer.createTransport({
     host: config.smtpHost,
     port: config.smtpPort,
     secure: config.smtpPort === 465,
     auth: { user: config.smtpUser, pass: config.smtpPass },
+    connectionTimeout: 15000,
+    greetingTimeout: 15000,
+    socketTimeout: 20000,
   });
   await transporter.sendMail({
     from: config.smtpUser,
