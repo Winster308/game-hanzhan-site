@@ -7,7 +7,7 @@
 - **后端**：Node.js + Express + PostgreSQL（Railway Postgres）
 - **用户端**：React 18 + Vite + React Router（仿 gityx.com 简洁风格）
 - **管理后台**：独立 React 站点（独立域名部署）
-- **邮件**：Brevo Transactional Email（未配置 key 时自动降级为日志）
+- **邮件**：SMTP（QQ 邮箱授权码等）优先，Brevo 备选；未配置时自动降级为日志
 
 ## 项目结构
 
