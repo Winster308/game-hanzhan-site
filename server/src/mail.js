@@ -1,15 +1,42 @@
+import nodemailer from 'nodemailer';
 import { config } from './config.js';
 
 /**
- * Brevo 邮件发送（占位实现）。
- * - 配置了 BREVO_API_KEY：调用 Brevo Transactional Email API (v3)
- * - 未配置：仅打印日志并返回成功（开发/未配置阶段不阻断流程）
+ * 邮件发送（优先级：SMTP → Brevo → 日志占位）。
+ * - 配置了 SMTP_USER（如 QQ 邮箱授权码）→ 走 SMTP
+ * - 配置了 BREVO_API_KEY → 走 Brevo Transactional Email API (v3)
+ * - 都没有 → 仅打印日志并返回成功（开发/未配置阶段不阻断流程）
  */
 export async function sendMail({ to, subject, html }) {
-  if (!config.brevoApiKey) {
-    console.log(`[mail:skipped] to=${to} subject=${subject}`);
-    return { skipped: true };
+  if (config.smtpUser) {
+    return sendViaSmtp({ to, subject, html });
   }
+  if (config.brevoApiKey) {
+    return sendViaBrevo({ to, subject, html });
+  }
+  console.log(`[mail:skipped] to=${to} subject=${subject}`);
+  return { skipped: true };
+}
+
+/** QQ 邮箱 / 任意 SMTP 发信（TLS 465） */
+async function sendViaSmtp({ to, subject, html }) {
+  const transporter = nodemailer.createTransport({
+    host: config.smtpHost,
+    port: config.smtpPort,
+    secure: config.smtpPort === 465,
+    auth: { user: config.smtpUser, pass: config.smtpPass },
+  });
+  await transporter.sendMail({
+    from: config.smtpUser,
+    to,
+    subject,
+    html,
+  });
+  return { ok: true };
+}
+
+/** Brevo API 发信 */
+async function sendViaBrevo({ to, subject, html }) {
   const res = await fetch('https://api.brevo.com/v3/smtp/email', {
     method: 'POST',
     headers: {

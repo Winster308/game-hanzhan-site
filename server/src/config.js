@@ -6,7 +6,11 @@ export const config = {
   databaseUrl: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/game_hanzhan',
   jwtSecret: process.env.JWT_SECRET || 'dev-secret-change-me-in-production',
   jwtExpiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  // Brevo 邮件（占位：未配置 BREVO_API_KEY 时邮件只打日志，不发送）
+  // 邮件：优先 SMTP（如 QQ 邮箱），其次 Brevo，都不配置则仅打日志
+  smtpHost: process.env.SMTP_HOST || 'smtp.qq.com',
+  smtpPort: Number(process.env.SMTP_PORT || 465),
+  smtpUser: process.env.SMTP_USER || '',
+  smtpPass: process.env.SMTP_PASS || '',
   brevoApiKey: process.env.BREVO_API_KEY || '',
   mailFrom: process.env.MAIL_FROM || '游戏汉化站 <no-reply@example.com>',
   siteName: '游戏汉化站',
