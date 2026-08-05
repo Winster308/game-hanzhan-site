@@ -341,6 +341,26 @@ router.put('/users/:id/unban', async (req, res) => {
   }
 });
 
+/** 删除用户（管理员不可删，含审计引用清理；关联数据由外键级联删除） */
+router.delete('/users/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const target = await query('SELECT id, username, role FROM users WHERE id = $1', [id]);
+    if (!target.length) return res.status(404).json({ error: '用户不存在' });
+    if (target[0].role === 'admin') return res.status(403).json({ error: '不能删除管理员账号' });
+    await withTransaction(async (client) => {
+      // audit_logs.admin_id 无级联，先置空避免外键冲突
+      await client.query('UPDATE audit_logs SET admin_id = NULL WHERE admin_id = $1', [id]);
+      await client.query('DELETE FROM users WHERE id = $1', [id]);
+    });
+    await audit(req.user.id, 'user.delete', 'user', id, { username: target[0].username });
+    res.json({ ok: true, message: `用户 ${target[0].username} 已删除` });
+  } catch (err) {
+    console.error('[admin/users/delete]', err);
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
 /** 调整角色（授予/撤销管理员） */
 router.put('/users/:id/role', async (req, res) => {
   try {
