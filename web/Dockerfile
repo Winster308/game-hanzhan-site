@@ -7,6 +7,9 @@ WORKDIR /app
 COPY package.json ./
 COPY index.html vite.config.js ./
 COPY src ./src
+# 构建时注入 API 地址（Railway 服务变量默认作为 build args 传入）
+ARG VITE_API_URL
+ENV VITE_API_URL=$VITE_API_URL
 RUN npm install --no-audit --no-fund && npm run build
 
 FROM nginx:1.27-alpine
