@@ -331,12 +331,53 @@ router.post('/change-password', async (req, res) => {
   }
 });
 
-// ── 修改邮箱（登录后，每月一次） ──────────────────────
+// ── 发送"修改邮箱"验证码（登录后） ───────────────────
+router.post('/send-change-email-code', async (req, res) => {
+  try {
+    if (!req.user) return res.status(401).json({ error: '请先登录' });
+    const newEmail = String((req.body || {}).newEmail || '').toLowerCase().trim();
+    if (!EMAIL_RE.test(newEmail)) return res.status(400).json({ error: '邮箱格式不正确' });
+
+    const dup = await query('SELECT id FROM users WHERE lower(email) = $1 AND id <> $2', [newEmail, req.user.id]);
+    if (dup.length) return res.status(400).json({ error: '该邮箱已被其他账号使用' });
+
+    const ip = getClientIp(req);
+    const rl = rateLimit({ key: `changecode:${req.user.id}:${newEmail}:${ip}`, limit: 1, windowMs: 60 * 1000 });
+    if (!rl.allowed) return res.status(429).json({ error: '发送过于频繁，请 60 秒后再试' });
+
+    await query("UPDATE email_tokens SET used = TRUE WHERE email = $1 AND kind = 'change_email'", [newEmail]);
+
+    const code = genCode();
+    await query(
+      `INSERT INTO email_tokens (user_id, email, token_hash, kind, expires_at)
+       VALUES ($1, $2, $3, 'change_email', now() + interval '10 minutes')`,
+      [req.user.id, newEmail, sha256(code)]
+    );
+    sendMail({
+      to: newEmail,
+      subject: `【${config.siteName}】修改邮箱验证码`,
+      html: mailTemplate('修改邮箱验证码', `
+        <p>您好！您正在将账号邮箱修改为 <b>${newEmail}</b>，验证码为：</p>
+        <p style="font-size:32px;font-weight:800;letter-spacing:6px;color:#4f46e5;margin:16px 0">${code}</p>
+        <p>请在修改邮箱页面输入以上验证码，<b>10 分钟内有效</b>。如非本人操作请忽略。</p>`),
+    }).catch((err) => console.error('[mail] change-email code failed:', err.message));
+
+    res.json({ ok: true, message: '验证码已发送到新邮箱' });
+  } catch (err) {
+    console.error('[auth/send-change-email-code]', err);
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ── 修改邮箱（登录后，需新邮箱验证码；管理员豁免每月限制） ──
 router.post('/change-email', async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: '请先登录' });
-    const { newEmail } = req.body || {};
-    if (!EMAIL_RE.test(String(newEmail || ''))) return res.status(400).json({ error: '邮箱格式不正确' });
+    const { newEmail: rawNew, code } = req.body || {};
+    const newEmail = String(rawNew || '').toLowerCase().trim();
+    if (!EMAIL_RE.test(newEmail)) return res.status(400).json({ error: '邮箱格式不正确' });
+    if (!String(code || '').trim()) return res.status(400).json({ error: '请输入新邮箱收到的验证码' });
+
     const user = await loadUser(req.user.id);
     if (!user) return res.status(401).json({ error: '账号不存在' });
     // 管理员豁免每月修改限制
@@ -350,15 +391,31 @@ router.post('/change-email', async (req, res) => {
         });
       }
     }
-    const normalized = String(newEmail).toLowerCase();
-    const dup = await query('SELECT id FROM users WHERE lower(email) = $1 AND id <> $2', [normalized, user.id]);
+    const dup = await query('SELECT id FROM users WHERE lower(email) = $1 AND id <> $2', [newEmail, user.id]);
     if (dup.length) return res.status(400).json({ error: '该邮箱已被使用' });
-    await query('UPDATE users SET email = $1, last_email_change_at = now(), email_verified = FALSE WHERE id = $2',
-      [normalized, user.id]);
-    // 新邮箱重新验证
-    await sendVerifyEmail({ ...user, email: normalized }).catch((err) => console.error('[mail] change-email failed:', err.message));
-    res.json({ ok: true, message: '邮箱修改成功，验证邮件已发送' });
+
+    // 校验验证码（防暴力）
+    const ip = getClientIp(req);
+    const rl = rateLimit({ key: `changecode-check:${user.id}:${newEmail}:${ip}`, limit: 5, windowMs: 30 * 1000 });
+    if (!rl.allowed) return res.status(429).json({ error: '验证码尝试过于频繁，请稍后再试' });
+    const codeRows = await query(
+      `SELECT id FROM email_tokens WHERE email = $1 AND kind = 'change_email' AND token_hash = $2
+       AND used = FALSE AND expires_at > now()`,
+      [newEmail, sha256(String(code).trim())]
+    );
+    if (!codeRows.length) return res.status(400).json({ error: '验证码错误或已过期' });
+
+    await withTransaction(async (client) => {
+      await client.query('UPDATE email_tokens SET used = TRUE WHERE id = $1', [codeRows[0].id]);
+      // 验证码已验证新邮箱所有权，直接置为已验证
+      await client.query(
+        'UPDATE users SET email = $1, email_verified = TRUE, last_email_change_at = now() WHERE id = $2',
+        [newEmail, user.id]
+      );
+    });
+    res.json({ ok: true, message: '邮箱修改成功' });
   } catch (err) {
+    console.error('[auth/change-email]', err);
     res.status(500).json({ error: '服务器错误' });
   }
 });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { api, formatTime, formatRemaining } from '../api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
@@ -14,6 +14,10 @@ export default function Settings() {
   const [logs, setLogs] = useState([]);
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
+  const [emailCode, setEmailCode] = useState('');
+  const [emailCodeCountdown, setEmailCodeCountdown] = useState(0);
+  const [emailCodeSending, setEmailCodeSending] = useState(false);
+  const emailTimerRef = useRef(null);
   const [passwords, setPasswords] = useState({ old: '', next: '', confirm: '' });
   const [msg, setMsg] = useState({});
 
@@ -39,10 +43,32 @@ export default function Settings() {
   const doChangeEmail = async (e) => {
     e.preventDefault();
     try {
-      await api('/auth/change-email', { method: 'POST', body: { newEmail: email } });
-      setMsg({ ...msg, email: '邮箱修改成功，验证邮件已发送' });
+      await api('/auth/change-email', { method: 'POST', body: { newEmail: email, code: emailCode } });
+      setMsg({ ...msg, email: '邮箱修改成功' });
+      setEmailCode('');
       refresh();
     } catch (err) { setMsg({ ...msg, email: err.message }); }
+  };
+
+  /** 发送"修改邮箱"验证码到新邮箱（60 秒倒计时） */
+  const sendEmailCode = async (e) => {
+    e.preventDefault();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return setMsg({ ...msg, email: '请先填写正确的新邮箱' });
+    }
+    setEmailCodeSending(true);
+    try {
+      const d = await api('/auth/send-change-email-code', { method: 'POST', body: { newEmail: email } });
+      setMsg({ ...msg, email: d.message });
+      setEmailCodeCountdown(60);
+      clearInterval(emailTimerRef.current);
+      emailTimerRef.current = setInterval(() => {
+        setEmailCodeCountdown((c) => {
+          if (c <= 1) { clearInterval(emailTimerRef.current); return 0; }
+          return c - 1;
+        });
+      }, 1000);
+    } catch (err) { setMsg({ ...msg, email: err.message }); } finally { setEmailCodeSending(false); }
   };
 
   const doChangePassword = async (e) => {
@@ -116,14 +142,21 @@ export default function Settings() {
         <form onSubmit={doChangeEmail} className="mb16" style={{ paddingBottom: 14, borderBottom: '1px solid var(--border)' }}>
           <div className="flex" style={{ flexWrap: 'wrap' }}>
             <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} style={{ width: 260 }} required />
-            <button className="btn btn-sm">修改邮箱</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={sendEmailCode} disabled={emailCodeSending || emailCodeCountdown > 0}>
+              {emailCodeCountdown > 0 ? `${emailCodeCountdown}s 后重发` : emailCodeSending ? '发送中…' : '发送验证码'}
+            </button>
+          </div>
+          <div className="flex mt8" style={{ flexWrap: 'wrap' }}>
+            <input value={emailCode} onChange={(e) => setEmailCode(e.target.value)} placeholder="新邮箱收到的 6 位验证码"
+              required inputMode="numeric" maxLength={6} style={{ width: 200 }} />
+            <button className="btn btn-sm">确认修改邮箱</button>
           </div>
           <p className="form-hint">
-            邮箱每月只能修改一次 · 当前状态：
+            邮箱每月只能修改一次（管理员不受限）· 当前状态：
             {user.email_verified
               ? <span className="badge badge-green">已验证</span>
               : <span className="badge badge-yellow">未验证</span>}
-            {!user.email_verified && <button type="button" className="btn btn-ghost btn-sm ml" style={{ marginLeft: 8 }} onClick={resendVerify}>重新发送验证邮件</button>}
+            {!user.email_verified && <button type="button" className="btn btn-ghost btn-sm" style={{ marginLeft: 8 }} onClick={resendVerify}>重新发送验证邮件</button>}
           </p>
           {msg.email && <p className={msg.email.includes('成功') ? 'form-success' : 'form-error'}>{msg.email}</p>}
         </form>
