@@ -88,13 +88,15 @@ router.post('/games/:id/comments', requireAuth, async (req, res) => {
     const ban = await isBanned(req.user.id);
     if (ban.banned) return res.status(403).json({ error: `账号已被封禁${ban.reason ? '：' + ban.reason : ''}` });
 
-    // 限流：每分钟最多 5 条
-    const recent = await query(
-      `SELECT COUNT(*)::int AS cnt FROM comments WHERE user_id = $1 AND created_at > now() - interval '1 minute'`,
-      [req.user.id]
-    );
-    if (recent[0].cnt >= config.commentLimitPerMinute) {
-      return res.status(429).json({ error: `评论过于频繁，每分钟最多 ${config.commentLimitPerMinute} 条` });
+    // 限流：每分钟最多 5 条（管理员豁免）
+    if (req.user.role !== 'admin') {
+      const recent = await query(
+        `SELECT COUNT(*)::int AS cnt FROM comments WHERE user_id = $1 AND created_at > now() - interval '1 minute'`,
+        [req.user.id]
+      );
+      if (recent[0].cnt >= config.commentLimitPerMinute) {
+        return res.status(429).json({ error: `评论过于频繁，每分钟最多 ${config.commentLimitPerMinute} 条` });
+      }
     }
 
     const result = await withTransaction(async (client) => {

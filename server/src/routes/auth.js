@@ -311,13 +311,16 @@ router.post('/change-password', async (req, res) => {
     if (!(await verifyPassword(oldPassword || '', user.password_hash))) {
       return res.status(400).json({ error: '原密码错误' });
     }
-    const last = user.last_password_change_at ? new Date(user.last_password_change_at).getTime() : 0;
-    const remaining = last + config.changeCooldownMs - Date.now();
-    if (remaining > 0) {
-      return res.status(400).json({
-        error: `密码每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
-        remaining_ms: remaining,
-      });
+    // 管理员豁免每月修改限制
+    if (req.user.role !== 'admin') {
+      const last = user.last_password_change_at ? new Date(user.last_password_change_at).getTime() : 0;
+      const remaining = last + config.changeCooldownMs - Date.now();
+      if (remaining > 0) {
+        return res.status(400).json({
+          error: `密码每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
+          remaining_ms: remaining,
+        });
+      }
     }
     const passwordHash = await hashPassword(newPassword);
     await query('UPDATE users SET password_hash = $1, last_password_change_at = now() WHERE id = $2',
@@ -336,13 +339,16 @@ router.post('/change-email', async (req, res) => {
     if (!EMAIL_RE.test(String(newEmail || ''))) return res.status(400).json({ error: '邮箱格式不正确' });
     const user = await loadUser(req.user.id);
     if (!user) return res.status(401).json({ error: '账号不存在' });
-    const last = user.last_email_change_at ? new Date(user.last_email_change_at).getTime() : 0;
-    const remaining = last + config.changeCooldownMs - Date.now();
-    if (remaining > 0) {
-      return res.status(400).json({
-        error: `邮箱每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
-        remaining_ms: remaining,
-      });
+    // 管理员豁免每月修改限制
+    if (req.user.role !== 'admin') {
+      const last = user.last_email_change_at ? new Date(user.last_email_change_at).getTime() : 0;
+      const remaining = last + config.changeCooldownMs - Date.now();
+      if (remaining > 0) {
+        return res.status(400).json({
+          error: `邮箱每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
+          remaining_ms: remaining,
+        });
+      }
     }
     const normalized = String(newEmail).toLowerCase();
     const dup = await query('SELECT id FROM users WHERE lower(email) = $1 AND id <> $2', [normalized, user.id]);
@@ -368,13 +374,16 @@ router.post('/change-username', async (req, res) => {
     if (isAdminUsername(newUsername)) return res.status(400).json({ error: '该用户名已被注册' });
     const user = await loadUser(req.user.id);
     if (!user) return res.status(401).json({ error: '账号不存在' });
-    const last = user.last_username_change_at ? new Date(user.last_username_change_at).getTime() : 0;
-    const remaining = last + config.changeCooldownMs - Date.now();
-    if (remaining > 0) {
-      return res.status(400).json({
-        error: `昵称每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
-        remaining_ms: remaining,
-      });
+    // 管理员豁免每月修改限制
+    if (req.user.role !== 'admin') {
+      const last = user.last_username_change_at ? new Date(user.last_username_change_at).getTime() : 0;
+      const remaining = last + config.changeCooldownMs - Date.now();
+      if (remaining > 0) {
+        return res.status(400).json({
+          error: `昵称每月只能修改一次，还需等待 ${Math.ceil(remaining / 86400000)} 天`,
+          remaining_ms: remaining,
+        });
+      }
     }
     const dup = await query('SELECT id FROM users WHERE lower(username) = $1 AND id <> $2', [String(newUsername).toLowerCase(), user.id]);
     if (dup.length) return res.status(400).json({ error: '该昵称已被使用' });
