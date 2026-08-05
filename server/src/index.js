@@ -2,7 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import { config } from './config.js';
 import { migrate } from './migrate.js';
-import { authMiddleware, getClientIp } from './auth.js';
+import { authMiddleware, getClientIp, hashPassword } from './auth.js';
+import { query } from './db.js';
 import { recordVisit } from './utils.js';
 import { enrichCountry } from './geo.js';
 
@@ -67,10 +68,33 @@ app.use((err, _req, res, _next) => {
 
 async function main() {
   await migrate();
+  await ensureAdmins();
   app.listen(config.port, () => {
     console.log(`[server] ${config.siteName} API 已启动: http://localhost:${config.port}`);
     console.log(`[server] 邮件: ${config.brevoApiKey ? 'Brevo 已配置' : '未配置 BREVO_API_KEY（邮件仅打日志）'}`);
   });
+}
+
+/**
+ * 幂等引导：确保 Winster / winster 管理员账号存在。
+ * 替代独立 seed 进程，避免部署时多进程/健康检查窗口问题。
+ */
+async function ensureAdmins() {
+  const adminPassword = process.env.ADMIN_PASSWORD || 'Winster@2025';
+  for (const username of config.adminUsernames) {
+    const existing = await query('SELECT id FROM users WHERE lower(username) = lower($1)', [username]);
+    if (existing.length) {
+      await query('UPDATE users SET role = $1 WHERE id = $2', ['admin', existing[0].id]);
+    } else {
+      const passwordHash = await hashPassword(adminPassword);
+      await query(
+        'INSERT INTO users (username, email, password_hash, role, email_verified) VALUES ($1,$2,$3,$4,TRUE)',
+        [username, `${username.toLowerCase()}@example.com`, passwordHash, 'admin']
+      );
+      console.log(`[bootstrap] 已创建管理员 ${username}`);
+    }
+  }
+  console.log('[bootstrap] 管理员账号已就绪');
 }
 
 main().catch((err) => {
