@@ -18,13 +18,14 @@ export async function sendMail({ to, subject, html }) {
   return { skipped: true };
 }
 
-/** QQ 邮箱 / 任意 SMTP 发信（TLS 465，带超时防止挂起） */
+/** QQ 邮箱 / 任意 SMTP 发信（TLS 465，带超时防止挂起；强制 IPv4 避免容器无 IPv6 出站） */
 async function sendViaSmtp({ to, subject, html }) {
   const transporter = nodemailer.createTransport({
     host: config.smtpHost,
     port: config.smtpPort,
     secure: config.smtpPort === 465,
     auth: { user: config.smtpUser, pass: config.smtpPass },
+    family: 4, // 强制 IPv4（Railway 容器通常无 IPv6 出站，IPv6 解析会导致 ENETUNREACH）
     connectionTimeout: 15000,
     greetingTimeout: 15000,
     socketTimeout: 20000,
