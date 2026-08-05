@@ -7,14 +7,15 @@ export default function Users({ show }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [banning, setBanning] = useState(null);
   const [banForm, setBanForm] = useState({ hours: 24, permanent: false, reason: '' });
 
   const load = useCallback(() => {
-    api(`/admin/users?page=${page}&pageSize=15${search ? `&search=${encodeURIComponent(search)}` : ''}`)
+    api(`/admin/users?page=${page}&pageSize=15${appliedSearch ? `&search=${encodeURIComponent(appliedSearch)}` : ''}`)
       .then((d) => { setUsers(d.users); setTotal(d.total); })
       .catch(() => {});
-  }, [page, search]);
+  }, [page, appliedSearch]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -50,6 +51,8 @@ export default function Users({ show }) {
   };
 
   const banRemaining = (u) => {
+    // 永久封禁：banned_until 为 Infinity 经 JSON 序列化为 null，但 ban_reason 仍在
+    if (!u.banned_until && u.ban_reason) return null;
     if (!u.banned_until) return 0;
     const ms = new Date(u.banned_until).getTime() - Date.now();
     return ms > 0 ? ms : 0;
@@ -64,8 +67,10 @@ export default function Users({ show }) {
 
       <div className="toolbar">
         <input placeholder="搜索用户名 / 邮箱…" value={search}
-          onChange={(e) => setSearch(e.target.value)} style={{ width: 260 }} />
-        <button className="btn btn-ghost" onClick={() => { setPage(1); load(); }}>搜索</button>
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); setAppliedSearch(search); } }}
+          style={{ width: 260 }} />
+        <button className="btn btn-ghost" onClick={() => { setPage(1); setAppliedSearch(search); }}>搜索</button>
       </div>
 
       <div className="card table-wrap">
@@ -87,14 +92,16 @@ export default function Users({ show }) {
                   <td>{u.role === 'admin' ? <span className="badge badge-purple">管理员</span> : <span className="badge badge-gray">用户</span>}</td>
                   <td>{u.email_verified ? <span className="badge badge-green">已验证</span> : <span className="badge badge-yellow">未验证</span>}</td>
                   <td>
-                    {remaining > 0
-                      ? <span className="badge badge-red">封禁中（剩 {formatRemaining(remaining)}）</span>
-                      : <span className="badge badge-green">正常</span>}
+                    {remaining === null
+                      ? <span className="badge badge-red">永久封禁</span>
+                      : remaining > 0
+                        ? <span className="badge badge-red">封禁中（剩 {formatRemaining(remaining)}）</span>
+                        : <span className="badge badge-green">正常</span>}
                   </td>
                   <td>{formatTime(u.created_at)}</td>
                   <td>
                     <div className="flex" style={{ flexWrap: 'wrap' }}>
-                      {remaining > 0 ? (
+                      {remaining !== 0 ? (
                         <button className="btn btn-green btn-sm" onClick={() => unban(u)}>解封</button>
                       ) : (
                         <button className="btn btn-red btn-sm" onClick={() => { setBanning(u); setBanForm({ hours: 24, permanent: false, reason: '' }); }}>封禁</button>

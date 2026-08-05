@@ -5,6 +5,7 @@ import { audit } from '../utils.js';
 import { config } from '../config.js';
 import { notify, notifyAll } from '../notify.js';
 import { checkAchievements } from '../achievements.js';
+import { validateGameBody } from '../game-validation.js';
 
 const router = Router();
 router.use(requireAdmin);
@@ -28,6 +29,7 @@ router.get('/stats', async (req, res) => {
       totals,
       pendingReports,
       pendingSaves,
+      pendingSubmissions,
     ] = await Promise.all([
       query("SELECT COUNT(DISTINCT ip)::int AS c FROM visit_logs WHERE created_at::date = CURRENT_DATE"),
       query("SELECT COUNT(*)::int AS c FROM visit_logs WHERE created_at::date = CURRENT_DATE"),
@@ -37,6 +39,7 @@ router.get('/stats', async (req, res) => {
       query("SELECT (SELECT COUNT(*)::int FROM games) AS games, (SELECT COUNT(*)::int FROM users) AS users, (SELECT COUNT(*)::int FROM comments) AS comments, (SELECT COUNT(*)::int FROM saves) AS saves, (SELECT COUNT(*)::int FROM announcements) AS announcements"),
       query("SELECT COUNT(*)::int AS c FROM reports WHERE status = 'pending'"),
       query("SELECT COUNT(*)::int AS c FROM saves WHERE status = 'pending'"),
+      query("SELECT COUNT(*)::int AS c FROM game_submissions WHERE status = 'pending'"),
     ]);
 
     // 最近 7 天每日独立访客
@@ -96,6 +99,7 @@ router.get('/stats', async (req, res) => {
       totals: totals[0],
       pending_reports: pendingReports[0].c,
       pending_saves: pendingSaves[0].c,
+      pending_submissions: pendingSubmissions[0].c,
       online_now: online[0].c,
       week,
       hourly,
@@ -123,7 +127,7 @@ router.get('/games', async (req, res) => {
     }
     const rows = await query(
       `SELECT id, title, description, tags, cover_type, cover_url,
-              original_url, localized_url, save_bank_enabled,
+              original_url, localized_url,
               play_count, likes_count, favorites_count, comments_count, created_at,
               (likes_count*2 + favorites_count*3 + comments_count*4 + play_count) AS score
        FROM games ${where} ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
@@ -136,47 +140,15 @@ router.get('/games', async (req, res) => {
   }
 });
 
-function validateGameBody(body) {
-  const b = body || {};
-  const title = String(b.title || '').trim();
-  const description = String(b.description || '').trim();
-  const originalUrl = String(b.original_url || '').trim();
-  const localizedUrl = String(b.localized_url || '').trim();
-  let tags = Array.isArray(b.tags) ? b.tags.map((t) => String(t).trim()).filter(Boolean).slice(0, 10) : [];
-  if (!title || title.length > 120) return { error: '标题需为 1-120 字' };
-  if (!description || description.length > 20000) return { error: '简介需为 1-20000 字' };
-  if (!/^https?:\/\//.test(originalUrl)) return { error: '原版链接需以 http(s):// 开头' };
-  if (!/^https?:\/\//.test(localizedUrl)) return { error: '汉化链接需以 http(s):// 开头' };
-  if (!tags.length) tags = ['未分类'];
-  const coverType = b.cover_type === 'upload' ? 'upload' : 'url';
-  let coverUrl = null;
-  let coverData = null;
-  if (coverType === 'upload') {
-    const data = String(b.cover_data || '');
-    if (!data.startsWith('data:image/')) return { error: '请上传图片文件' };
-    const bytes = Buffer.byteLength(data, 'utf8');
-    if (bytes > config.coverMaxBytes * 1.35) return { error: '图片不能超过 5MB' };
-    coverData = data;
-  } else {
-    coverUrl = String(b.cover_url || '').trim() || null;
-  }
-  return {
-    value: {
-      title, description, tags, originalUrl, localizedUrl, coverType, coverUrl, coverData,
-      saveBankEnabled: Boolean(b.save_bank_enabled),
-    },
-  };
-}
-
 router.post('/games', async (req, res) => {
   try {
     const v = validateGameBody(req.body);
     if (v.error) return res.status(400).json({ error: v.error });
-    const { title, description, tags, originalUrl, localizedUrl, coverType, coverUrl, coverData, saveBankEnabled } = v.value;
+    const { title, description, tags, originalUrl, localizedUrl, coverType, coverUrl, coverData } = v.value;
     const rows = await query(
-      `INSERT INTO games (title, description, tags, cover_type, cover_url, cover_data, original_url, localized_url, save_bank_enabled)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`,
-      [title, description, tags, coverType, coverUrl, coverData, originalUrl, localizedUrl, saveBankEnabled]
+      `INSERT INTO games (title, description, tags, cover_type, cover_url, cover_data, original_url, localized_url)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [title, description, tags, coverType, coverUrl, coverData, originalUrl, localizedUrl]
     );
     await audit(req.user.id, 'game.create', 'game', rows[0].id, { title });
     res.status(201).json({ id: rows[0].id, message: '游戏已添加' });
@@ -191,12 +163,12 @@ router.put('/games/:id', async (req, res) => {
     const id = Number(req.params.id);
     const v = validateGameBody(req.body);
     if (v.error) return res.status(400).json({ error: v.error });
-    const { title, description, tags, originalUrl, localizedUrl, coverType, coverUrl, coverData, saveBankEnabled } = v.value;
+    const { title, description, tags, originalUrl, localizedUrl, coverType, coverUrl, coverData } = v.value;
     const rows = await query(
       `UPDATE games SET title=$1, description=$2, tags=$3, cover_type=$4, cover_url=$5, cover_data=$6,
-       original_url=$7, localized_url=$8, save_bank_enabled=$9, updated_at=now()
-       WHERE id=$10 RETURNING id`,
-      [title, description, tags, coverType, coverUrl, coverData, originalUrl, localizedUrl, saveBankEnabled, id]
+       original_url=$7, localized_url=$8, updated_at=now()
+       WHERE id=$9 RETURNING id`,
+      [title, description, tags, coverType, coverUrl, coverData, originalUrl, localizedUrl, id]
     );
     if (!rows.length) return res.status(404).json({ error: '游戏不存在' });
     await audit(req.user.id, 'game.update', 'game', id, { title });
@@ -592,6 +564,100 @@ router.put('/saves/:id', async (req, res) => {
     }
     res.json({ ok: true, message: action === 'approve' ? '已通过' : '已驳回' });
   } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+// ══════════════ 游戏投稿审核 ══════════════
+router.get('/submissions', async (req, res) => {
+  try {
+    const { page, pageSize, offset } = pagination(req);
+    const status = String(req.query.status || 'pending');
+    const conds = [];
+    const params = [];
+    if (['pending', 'approved', 'rejected'].includes(status)) {
+      params.push(status);
+      conds.push(`s.status = $${params.length}`);
+    }
+    const where = conds.length ? `WHERE ${conds.join(' AND ')}` : '';
+    const rows = await query(
+      `SELECT s.id, s.title, s.tags, s.status, s.reject_reason, s.game_id, s.created_at,
+              s.original_url, s.localized_url, u.username AS submitter
+       FROM game_submissions s JOIN users u ON u.id = s.user_id
+       ${where} ORDER BY s.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+      [...params, pageSize, offset]
+    );
+    const total = await query(`SELECT COUNT(*)::int AS c FROM game_submissions s ${where}`, params);
+    res.json({ submissions: rows, total: total[0].c, page, pageSize });
+  } catch (err) {
+    console.error('[admin/submissions]', err);
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+/** 查看投稿完整内容（审核用） */
+router.get('/submissions/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const rows = await query(
+      `SELECT s.*, u.username AS submitter FROM game_submissions s
+       JOIN users u ON u.id = s.user_id WHERE s.id = $1`,
+      [id]
+    );
+    if (!rows.length) return res.status(404).json({ error: '投稿不存在' });
+    res.json({ submission: rows[0] });
+  } catch (err) {
+    console.error('[admin/submissions/detail]', err);
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+/** 审核投稿 { action: 'approve' | 'reject', reason? } — approve 即创建游戏并上架 */
+router.put('/submissions/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const { action, reason } = req.body || {};
+    if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: '操作不合法' });
+    const rows = await query('SELECT * FROM game_submissions WHERE id = $1 AND status = $2', [id, 'pending']);
+    if (!rows.length) return res.status(404).json({ error: '投稿不存在或已审核' });
+    const sub = rows[0];
+
+    if (action === 'approve') {
+      const result = await withTransaction(async (client) => {
+        // 条件 UPDATE 认领待审投稿，防止并发审核重复上架
+        const claim = await client.query(
+          `UPDATE game_submissions SET status='approved', reviewed_by=$1, reviewed_at=now()
+           WHERE id=$2 AND status='pending' RETURNING id`,
+          [req.user.id, id]
+        );
+        if (!claim.rows.length) throw new Error('ALREADY_REVIEWED');
+        const g = await client.query(
+          `INSERT INTO games (title, description, tags, cover_type, cover_url, cover_data, original_url, localized_url)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+          [sub.title, sub.description, sub.tags, sub.cover_type, sub.cover_url, sub.cover_data, sub.original_url, sub.localized_url]
+        );
+        await client.query('UPDATE game_submissions SET game_id = $1 WHERE id = $2', [g.rows[0].id, id]);
+        return g.rows[0].id;
+      });
+      await audit(req.user.id, 'submission.approve', 'submission', id, { title: sub.title, game_id: result });
+      notify(sub.user_id, 'submission_approved', '您的游戏投稿已通过', `「${sub.title}」已上架！`, `/games/${result}`);
+      res.json({ ok: true, message: '已通过并上架', game_id: result });
+    } else {
+      const r = String(reason || '').trim();
+      if (!r) return res.status(400).json({ error: '请填写驳回原因' });
+      await query(
+        'UPDATE game_submissions SET status=$1, reject_reason=$2, reviewed_by=$3, reviewed_at=now() WHERE id=$4',
+        ['rejected', r, req.user.id, id]
+      );
+      await audit(req.user.id, 'submission.reject', 'submission', id, { title: sub.title, reason: r });
+      notify(sub.user_id, 'submission_rejected', '您的游戏投稿被驳回', `「${sub.title}」：${r}`, '/submit');
+      res.json({ ok: true, message: '已驳回' });
+    }
+  } catch (err) {
+    if (err.message === 'ALREADY_REVIEWED') {
+      return res.status(409).json({ error: '投稿已被其他管理员审核' });
+    }
+    console.error('[admin/submissions/handle]', err);
     res.status(500).json({ error: '服务器错误' });
   }
 });

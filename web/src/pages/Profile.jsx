@@ -14,7 +14,7 @@ const TABS = [
 ];
 
 export default function Profile() {
-  const { user } = useAuth();
+  const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const initialTab = TABS.some(([k]) => k === params.get('tab')) ? params.get('tab') : 'favorites';
@@ -27,25 +27,14 @@ export default function Profile() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (authLoading) return; // 等待 AuthContext 加载完成，避免误跳登录页
     if (!user) { navigate('/login'); return; }
-  }, [user, navigate]);
+  }, [user, navigate, authLoading]);
 
   useEffect(() => {
     if (!user) return;
     setLoading(true);
     const tasks = [];
-    if (tab === 'favorites' || tab === 'likes') {
-      tasks.push(
-        api('/games?page=1&pageSize=100', { auth: false }).then((d) => {
-          const all = d.games;
-          const ids = new Set(all.map((g) => g.id));
-          // 后端列表接口不返回我的状态，这里用详情接口逐个确认成本高；
-          // 改用本地筛选不可行——后端提供专用接口更优，见 fetchMyGames。
-          void ids;
-          return all;
-        }).catch(() => [])
-      );
-    }
     if (tab === 'comments') tasks.push(api('/my/comments').then((d) => setComments(d.comments)).catch(() => []));
     if (tab === 'saves') tasks.push(api('/my/saves').then((d) => setSaves(d.saves)).catch(() => []));
     if (tab === 'reports') tasks.push(api('/reports/my').then((d) => setReports(d.reports)).catch(() => []));

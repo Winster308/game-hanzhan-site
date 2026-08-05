@@ -7,7 +7,7 @@ const router = Router();
 router.get('/', async (req, res) => {
   try {
     const rows = await query(
-      `SELECT id, title, content, is_pinned, created_at, updated_at,
+      `SELECT a.id, a.title, a.content, a.is_pinned, a.created_at, a.updated_at,
               u.username AS author
        FROM announcements a LEFT JOIN users u ON u.id = a.created_by
        WHERE a.expires_at IS NULL OR a.expires_at > now()

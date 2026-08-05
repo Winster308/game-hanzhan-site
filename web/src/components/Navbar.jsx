@@ -62,7 +62,7 @@ export default function Navbar() {
           <div className="nav-links">
             <NavLink to="/" end>首页</NavLink>
             <NavLink to="/leaderboard">排行榜</NavLink>
-            <NavLink to="/saves">存档银行</NavLink>
+            <NavLink to="/submit">投稿游戏</NavLink>
             <NavLink to="/announcements">公告</NavLink>
           </div>
           <form className="nav-search" onSubmit={doSearch}>

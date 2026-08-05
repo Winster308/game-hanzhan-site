@@ -32,6 +32,8 @@ export default function Appeals({ show }) {
   };
 
   const banRemaining = (u) => {
+    // 永久封禁：banned_until 为 Infinity 经 JSON 序列化为 null，但 ban_reason 仍在
+    if (!u.banned_until && u.ban_reason) return null;
     if (!u.banned_until) return 0;
     const ms = new Date(u.banned_until).getTime() - Date.now();
     return ms > 0 ? ms : 0;
@@ -64,9 +66,11 @@ export default function Appeals({ show }) {
                   <td>{a.id}</td>
                   <td style={{ fontWeight: 600 }}>{a.username} <span className="muted small">(#{a.user_id})</span></td>
                   <td>
-                    {remaining > 0
-                      ? <span className="badge badge-red">封禁中（剩 {formatRemaining(remaining)}）</span>
-                      : <span className="badge badge-green">已解封/正常</span>}
+                    {remaining === null
+                      ? <span className="badge badge-red">永久封禁</span>
+                      : remaining > 0
+                        ? <span className="badge badge-red">封禁中（剩 {formatRemaining(remaining)}）</span>
+                        : <span className="badge badge-green">已解封/正常</span>}
                   </td>
                   <td className="cell-clamp" style={{ maxWidth: 300 }}>{a.reason}</td>
                   <td>

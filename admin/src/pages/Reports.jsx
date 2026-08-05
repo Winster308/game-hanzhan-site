@@ -31,7 +31,7 @@ export default function Reports({ show }) {
     try {
       await api(`/admin/reports/${handling.id}`, {
         method: 'PUT',
-        body: { ...form, ban_hours: Number(form.ban_hours) },
+        body: { action: 'approve', ...form, ban_hours: Number(form.ban_hours) },
       });
       show('处理完成', 'ok');
       setHandling(null);

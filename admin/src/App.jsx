@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Route, Routes, useNavigate } from 'react-router-dom';
+import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext.jsx';
 import Login from './pages/Login.jsx';
 import Dashboard from './pages/Dashboard.jsx';
@@ -8,6 +8,7 @@ import Comments from './pages/Comments.jsx';
 import Users from './pages/Users.jsx';
 import Reports from './pages/Reports.jsx';
 import Saves from './pages/Saves.jsx';
+import Submissions from './pages/Submissions.jsx';
 import Appeals from './pages/Appeals.jsx';
 import Announcements from './pages/Announcements.jsx';
 import AuditLogs from './pages/AuditLogs.jsx';
@@ -27,15 +28,16 @@ function Layout() {
   };
 
   const links = [
-    ['/admin', '📊', '仪表盘'],
-    ['/admin/games', '🎮', '游戏管理'],
-    ['/admin/comments', '💬', '评论管理'],
-    ['/admin/users', '👥', '用户管理'],
-    ['/admin/reports', '🚩', '举报审核'],
-    ['/admin/appeals', '🧾', '申诉审核'],
-    ['/admin/saves', '💾', '存档审核'],
-    ['/admin/announcements', '📢', '公告管理'],
-    ['/admin/audit', '📜', '审计日志'],
+    ['/', '📊', '仪表盘'],
+    ['/games', '🎮', '游戏管理'],
+    ['/comments', '💬', '评论管理'],
+    ['/users', '👥', '用户管理'],
+    ['/reports', '🚩', '举报审核'],
+    ['/appeals', '🧾', '申诉审核'],
+    ['/saves', '💾', '存档审核'],
+    ['/submissions', '📮', '投稿审核'],
+    ['/announcements', '📢', '公告管理'],
+    ['/audit', '📜', '审计日志'],
   ];
 
   return (
@@ -43,13 +45,13 @@ function Layout() {
       <aside className="sidebar">
         <div className="logo"><span>🎮</span><span className="txt">游戏汉化站</span></div>
         {links.map(([to, icon, label]) => (
-          <NavLink key={to} to={to} end={to === '/admin'}>
+          <NavLink key={to} to={to} end={to === '/'}>
             <span>{icon}</span><span className="txt">{label}</span>
           </NavLink>
         ))}
         <div className="spacer" />
         <div className="small muted" style={{ padding: '0 12px 8px' }}>{user?.username}</div>
-        <button className="logout" onClick={() => { logout(); navigate('/admin/login'); }}>
+        <button className="logout" onClick={() => { logout(); navigate('/login'); }}>
           🚪 <span className="txt">退出登录</span>
         </button>
       </aside>
@@ -62,8 +64,10 @@ function Layout() {
           <Route path="/reports" element={<Reports show={show} />} />
           <Route path="/appeals" element={<Appeals show={show} />} />
           <Route path="/saves" element={<Saves show={show} />} />
+          <Route path="/submissions" element={<Submissions show={show} />} />
           <Route path="/announcements" element={<Announcements show={show} />} />
           <Route path="/audit" element={<AuditLogs />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
       <Toast message={toast} />

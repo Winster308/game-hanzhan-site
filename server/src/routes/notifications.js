@@ -47,15 +47,4 @@ router.post('/read-all', async (req, res) => {
   }
 });
 
-// ── 单条已读 ──────────────────────────────────────────
-router.post('/:id/read', async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    await query('UPDATE notifications SET is_read = TRUE WHERE id = $1 AND user_id = $2', [id, req.user.id]);
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: '服务器错误' });
-  }
-});
-
 export default router;

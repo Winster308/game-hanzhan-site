@@ -58,6 +58,10 @@ export default function Dashboard() {
           <div className="stat-value yellow">{stats.pending_saves}</div>
         </div>
         <div className="stat-card">
+          <div className="stat-label">待审核投稿</div>
+          <div className="stat-value yellow">{stats.pending_submissions}</div>
+        </div>
+        <div className="stat-card">
           <div className="stat-label">游戏总数</div>
           <div className="stat-value">{totalGames}</div>
         </div>

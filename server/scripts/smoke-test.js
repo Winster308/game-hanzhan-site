@@ -85,14 +85,33 @@ async function main() {
   check('上传存档（待审核）', save.status === 201 && save.data.save.status === 'pending', JSON.stringify(save.data));
   saveId = save.data.save.id;
 
-  console.log('── 7. 举报 ──');
+  console.log('── 7. 游戏投稿 ──');
+  const submit = await call('/submissions', { method: 'POST', token: userToken, body: { title: '冒烟测试投稿', description: '测试投稿内容', tags: ['测试'], original_url: 'https://example.com', localized_url: 'https://example.com/cn' } });
+  check('提交投稿', submit.status === 201 && submit.data.submission.status === 'pending', JSON.stringify(submit.data));
+  const submitId = submit.data.submission.id;
+  const noAuthSubmit = await call('/submissions', { method: 'POST', body: { title: 'x', description: 'y', tags: [], original_url: 'https://a.com', localized_url: 'https://b.com' } });
+  check('未登录投稿被拒', noAuthSubmit.status === 401);
+  const adminSubmits = await call('/admin/submissions?status=pending', { token: adminToken });
+  check('后台投稿列表', adminSubmits.status === 200 && adminSubmits.data.submissions.some((s) => s.id === submitId));
+  const approveSub = await call(`/admin/submissions/${submitId}`, { method: 'PUT', token: adminToken, body: { action: 'approve' } });
+  check('审核通过并上架', approveSub.status === 200 && approveSub.data.game_id, JSON.stringify(approveSub.data));
+  const newGameId = approveSub.data.game_id;
+  const published = await call(`/games/${newGameId}`);
+  check('上架后游戏可见', published.status === 200 && published.data.game.title === '冒烟测试投稿');
+  const mySubs = await call('/submissions/my', { token: userToken });
+  check('我的投稿状态已通过', mySubs.data.submissions.find((s) => s.id === submitId)?.status === 'approved');
+  const rejectSub = await call('/submissions', { method: 'POST', token: userToken, body: { title: '冒烟测试投稿2', description: '将被驳回', tags: [], original_url: 'https://example.com', localized_url: 'https://example.com/cn' } });
+  const rejectRes = await call(`/admin/submissions/${rejectSub.data.submission.id}`, { method: 'PUT', token: adminToken, body: { action: 'reject', reason: '测试驳回' } });
+  check('审核驳回', rejectRes.status === 200);
+
+  console.log('── 8. 举报 ──');
   const report = await call('/reports', { method: 'POST', body: { target_type: 'comment', target_id: commentId, reason: '广告/引流', detail: '测试举报' }, token: userToken });
   check('提交举报', report.status === 201, JSON.stringify(report.data));
   reportId = report.data.report.id;
   const dupReport = await call('/reports', { method: 'POST', body: { target_type: 'comment', target_id: commentId, reason: '其他' }, token: userToken });
   check('重复举报被拒', dupReport.status === 400);
 
-  console.log('── 8. 通知/成就 ──');
+  console.log('── 9. 通知/成就 ──');
   const unread = await call('/notifications/unread-count', { token: userToken });
   check('成就通知已生成（未读数≥1）', unread.data.count >= 1, JSON.stringify(unread.data));
   const ach = await call('/my/achievements', { token: userToken });
@@ -103,10 +122,10 @@ async function main() {
   const unread2 = await call('/notifications/unread-count', { token: userToken });
   check('全部已读', unread2.data.count === 0);
 
-  console.log('── 9. 管理后台 ──');
+  console.log('── 10. 管理后台 ──');
   const adminGames = await call('/admin/games?page=1', { token: adminToken });
   check('管理端游戏列表', adminGames.status === 200);
-  const newGame = await call('/admin/games', { method: 'POST', token: adminToken, body: { title: '冒烟测试游戏', description: '测试用游戏', tags: ['测试'], original_url: 'https://example.com', localized_url: 'https://example.com/cn', save_bank_enabled: true } });
+  const newGame = await call('/admin/games', { method: 'POST', token: adminToken, body: { title: '冒烟测试游戏', description: '测试用游戏', tags: ['测试'], original_url: 'https://example.com', localized_url: 'https://example.com/cn' } });
   check('添加游戏', newGame.status === 201, JSON.stringify(newGame.data));
   const upd = await call(`/admin/games/${newGame.data.id}/updates`, { method: 'POST', token: adminToken, body: { version: 'v1.0.1', content: '修复崩溃问题' } });
   check('添加更新日志', upd.status === 201);
@@ -121,7 +140,7 @@ async function main() {
   const audit = await call('/admin/audit-logs?page=1', { token: adminToken });
   check('审计日志', audit.data.logs.length >= 5, `count=${audit.data.logs.length}`);
 
-  console.log('── 10. 封禁/申诉 ──');
+  console.log('── 11. 封禁/申诉 ──');
   const banUser = await call(`/admin/users/${reg.data.user.id}/ban`, { method: 'PUT', token: adminToken, body: { hours: 48, reason: '测试封禁' } });
   check('封禁用户', banUser.status === 200);
   const bannedComment = await call(`/games/${gameId}/comments`, { method: 'POST', body: { content: '被封禁后还能评论吗' }, token: userToken });
@@ -134,7 +153,7 @@ async function main() {
   const commentAfter = await call(`/games/${gameId}/comments`, { method: 'POST', body: { content: '解封后恢复评论权限' }, token: userToken });
   check('解封后可评论', commentAfter.status === 201);
 
-  console.log('── 11. 搜索记录 ──');
+  console.log('── 12. 搜索记录 ──');
   await call('/games?search=星露');
   const stats2 = await call('/admin/stats', { token: adminToken });
   check('热门搜索词有记录', stats2.data.hot_searches.length >= 1, JSON.stringify(stats2.data.hot_searches));

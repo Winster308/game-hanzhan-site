@@ -3,6 +3,13 @@ import { api, formatTime } from '../api.js';
 
 const EMPTY = { title: '', content: '', is_pinned: false, expires_at: '' };
 
+/** UTC ISO 转本地 datetime-local 格式（避免时区漂移） */
+function toLocalInput(iso) {
+  const d = new Date(iso);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
 export default function Announcements({ show }) {
   const [list, setList] = useState([]);
   const [editing, setEditing] = useState(null); // null | 'new' | 公告
@@ -21,7 +28,7 @@ export default function Announcements({ show }) {
     } else {
       setForm({
         title: a.title, content: a.content, is_pinned: a.is_pinned,
-        expires_at: a.expires_at ? a.expires_at.slice(0, 16) : '',
+        expires_at: a.expires_at ? toLocalInput(a.expires_at) : '',
       });
       setEditing(a);
     }

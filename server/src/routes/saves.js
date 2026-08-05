@@ -7,38 +7,7 @@ import { checkAchievements } from '../achievements.js';
 
 const router = Router();
 
-// ── 存档总览（全部已审核存档，可按游戏筛选） ──────────
-router.get('/', async (req, res) => {
-  try {
-    const gameId = Number(req.query.game_id) || null;
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 20));
-    const params = [];
-    let where = "s.status = 'approved'";
-    if (gameId) {
-      params.push(gameId);
-      where += ` AND s.game_id = $${params.length}`;
-    }
-    const rows = await query(
-      `SELECT s.id, s.game_id, s.title, s.filename, s.download_count, s.created_at,
-              g.title AS game_title, u.username AS uploader
-       FROM saves s
-       JOIN games g ON g.id = s.game_id
-       JOIN users u ON u.id = s.user_id
-       WHERE ${where}
-       ORDER BY s.created_at DESC
-       LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
-      [...params, pageSize, (page - 1) * pageSize]
-    );
-    const total = await query(`SELECT COUNT(*)::int AS c FROM saves s WHERE ${where}`, params);
-    res.json({ saves: rows, total: total[0].c, page, pageSize });
-  } catch (err) {
-    console.error('[saves/all]', err);
-    res.status(500).json({ error: '服务器错误' });
-  }
-});
-
-// ── 某游戏的已审核存档（公开） ────────────────────────
+// ── 某游戏的已审核存档（公开，存档银行已并入每个游戏详情页） ──
 router.get('/games/:id/saves', async (req, res) => {
   try {
     const gameId = Number(req.params.id);
@@ -64,17 +33,14 @@ router.get('/games/:id/saves', async (req, res) => {
   }
 });
 
-// ── 上传存档（需管理员开启该游戏的存档银行） ──────────
+// ── 上传存档（每个游戏均内置存档银行） ─────────────────
 router.post('/games/:id/saves', requireAuth, async (req, res) => {
   try {
     const gameId = Number(req.params.id);
     const { title, content, filename } = req.body || {};
 
-    const games = await query('SELECT save_bank_enabled FROM games WHERE id = $1', [gameId]);
+    const games = await query('SELECT id FROM games WHERE id = $1', [gameId]);
     if (!games.length) return res.status(404).json({ error: '游戏不存在' });
-    if (!games[0].save_bank_enabled) {
-      return res.status(400).json({ error: '该游戏未开启存档银行' });
-    }
 
     const t = String(title || '').trim();
     const c = String(content || '');

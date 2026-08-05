@@ -6,7 +6,7 @@ import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useToast } from '../components/Toast.jsx';
 
 export default function Settings() {
-  const { user, refresh } = useAuth();
+  const { user, refresh, loading } = useAuth();
   const { theme, setTheme } = useTheme();
   const { show } = useToast();
   const navigate = useNavigate();
@@ -18,11 +18,12 @@ export default function Settings() {
   const [msg, setMsg] = useState({});
 
   useEffect(() => {
+    if (loading) return; // 等待 AuthContext 加载完成，避免误跳登录页
     if (!user) { navigate('/login'); return; }
     setUsername(user.username);
     setEmail(user.email);
     api('/auth/login-logs').then((d) => setLogs(d.logs)).catch(() => {});
-  }, [user, navigate]);
+  }, [user, navigate, loading]);
 
   if (!user) return null;
 
@@ -64,7 +65,10 @@ export default function Settings() {
     } catch (err) { show(err.message, 'error'); }
   };
 
-  const isBanned = user.banned_until && new Date(user.banned_until).getTime() > Date.now();
+  const bannedUntilMs = user.banned_until ? new Date(user.banned_until).getTime() : 0;
+  // 永久封禁：banned_until 为 Infinity 经 JSON 序列化为 null，但 ban_reason 仍在
+  const isBanned = bannedUntilMs > Date.now() || (!user.banned_until && !!user.ban_reason);
+  const banRemainingMs = bannedUntilMs > Date.now() ? bannedUntilMs - Date.now() : null;
 
   return (
     <div className="container" style={{ maxWidth: 900 }}>
@@ -76,7 +80,7 @@ export default function Settings() {
         <div className="card mb16" style={{ padding: 16, borderColor: 'var(--danger)' }}>
           <strong style={{ color: 'var(--danger)' }}>⛔ 账号封禁中</strong>
           <p className="small mt8">
-            原因：{user.ban_reason || '未说明'} · 剩余：{formatRemaining(new Date(user.banned_until).getTime() - Date.now())}
+            原因：{user.ban_reason || '未说明'} · 剩余：{banRemainingMs ? formatRemaining(banRemainingMs) : '永久'}
           </p>
           <button className="btn btn-outline btn-sm mt8" onClick={() => navigate('/appeals')}>
             提交封禁申诉

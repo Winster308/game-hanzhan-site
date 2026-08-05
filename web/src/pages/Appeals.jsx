@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext.jsx';
 import { useToast } from '../components/Toast.jsx';
 
 export default function Appeals() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const { show } = useToast();
   const [appeals, setAppeals] = useState([]);
@@ -18,18 +18,21 @@ export default function Appeals() {
   }, []);
 
   useEffect(() => {
+    if (loading) return; // 等待 AuthContext 加载完成，避免误跳登录页
     if (!user) { navigate('/login'); return; }
     load();
     // 当前封禁状态
     api('/auth/me').then((d) => {
       const u = d.user;
-      if (u.banned_until && new Date(u.banned_until).getTime() > Date.now()) {
-        setBanned({ reason: u.ban_reason, remainingMs: new Date(u.banned_until).getTime() - Date.now() });
+      const ms = u.banned_until ? new Date(u.banned_until).getTime() - Date.now() : 0;
+      // 永久封禁：banned_until 为 Infinity 经 JSON 序列化为 null，但 ban_reason 仍在
+      if (ms > 0 || (!u.banned_until && !!u.ban_reason)) {
+        setBanned({ reason: u.ban_reason, remainingMs: ms > 0 ? ms : null });
       } else {
         setBanned(null);
       }
     }).catch(() => {});
-  }, [user, navigate, load]);
+  }, [user, navigate, load, loading]);
 
   if (!user) return null;
 
@@ -56,7 +59,7 @@ export default function Appeals() {
           <div className="card" style={{ background: 'var(--bg-hover)', padding: 14, marginBottom: 14, border: 'none' }}>
             <strong style={{ color: 'var(--danger)' }}>⛔ 当前处于封禁状态</strong>
             <p className="small mt8">
-              原因：{banned.reason || '未说明'} · 剩余：{formatRemaining(banned.remainingMs)}
+              原因：{banned.reason || '未说明'} · 剩余：{banned.remainingMs ? formatRemaining(banned.remainingMs) : '永久'}
             </p>
             <p className="small muted mt8">如认为封禁有误，请提交申诉，管理员会尽快处理。</p>
           </div>

@@ -12,6 +12,10 @@ export async function isBanned(userId) {
   if (!rows.length) return { banned: true, reason: '账号不存在', remainingMs: 0 };
   const u = rows[0];
   if (!u.banned_until) return { banned: false };
+  // 永久封禁：pg 将 'infinity' 解析为 Infinity
+  if (u.banned_until === Infinity || u.banned_until === 'infinity') {
+    return { banned: true, reason: u.ban_reason, remainingMs: null, permanent: true };
+  }
   const remainingMs = new Date(u.banned_until).getTime() - Date.now();
   if (remainingMs <= 0) return { banned: false };
   return { banned: true, reason: u.ban_reason, remainingMs };

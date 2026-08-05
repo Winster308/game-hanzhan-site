@@ -4,7 +4,7 @@ import Pagination from '../components/Pagination.jsx';
 
 const EMPTY_FORM = {
   title: '', description: '', tags: '', original_url: '', localized_url: '',
-  cover_type: 'url', cover_url: '', save_bank_enabled: false,
+  cover_type: 'url', cover_url: '',
 };
 
 export default function Games({ show }) {
@@ -39,7 +39,7 @@ export default function Games({ show }) {
     setForm({
       title: g.title, description: g.description, tags: (g.tags || []).join(', '),
       original_url: g.original_url, localized_url: g.localized_url,
-      cover_type: g.cover_type, cover_url: g.cover_url || '', save_bank_enabled: g.save_bank_enabled,
+      cover_type: g.cover_type, cover_url: g.cover_url || '',
     });
     setCoverPreview(g.cover_type === 'upload' ? g.cover_data : (g.cover_url || ''));
     setEditing(g);
@@ -110,7 +110,7 @@ export default function Games({ show }) {
           <thead>
             <tr>
               <th>ID</th><th>封面</th><th>标题</th><th>标签</th>
-              <th>▶ 游玩</th><th>👍</th><th>⭐</th><th>💬</th><th>存档银行</th><th>创建时间</th><th>操作</th>
+              <th>▶ 游玩</th><th>👍</th><th>⭐</th><th>💬</th><th>创建时间</th><th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -127,7 +127,6 @@ export default function Games({ show }) {
                 <td className="cell-clamp" style={{ fontWeight: 600 }}>{g.title}</td>
                 <td className="cell-clamp">{g.tags.join(', ')}</td>
                 <td>{g.play_count}</td><td>{g.likes_count}</td><td>{g.favorites_count}</td><td>{g.comments_count}</td>
-                <td>{g.save_bank_enabled ? <span className="badge badge-green">已开启</span> : <span className="badge badge-gray">未开启</span>}</td>
                 <td>{formatTime(g.created_at)}</td>
                 <td>
                   <div className="flex">
@@ -187,11 +186,8 @@ export default function Games({ show }) {
                 </div>
               </div>
               <div className="form-group full flex">
-                <label style={{ margin: 0 }}>
-                  <input type="checkbox" checked={form.save_bank_enabled}
-                    onChange={(e) => setForm({ ...form, save_bank_enabled: e.target.checked })}
-                    style={{ width: 'auto', marginRight: 6 }} />
-                  开启该游戏的存档银行（玩家可上传存档供审核分享）
+                <label style={{ margin: 0 }} className="small muted">
+                  💾 存档银行已内置到每个游戏详情页，玩家可直接上传存档
                 </label>
               </div>
             </div>

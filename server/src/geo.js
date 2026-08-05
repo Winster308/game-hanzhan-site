@@ -5,10 +5,13 @@ import { query } from './db.js';
  * 结果回填 visit_logs.country；任何失败静默降级，不影响主流程。
  */
 const cache = new Map(); // ip -> country | null
+const CACHE_MAX = 10000;
 
 export async function enrichCountry(ip) {
   if (!ip) return null;
   if (cache.has(ip)) return cache.get(ip);
+  // 防止长期运行内存无限增长：超上限时清空
+  if (cache.size >= CACHE_MAX) cache.clear();
   try {
     const res = await fetch(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,country`, {
       signal: AbortSignal.timeout(3500),

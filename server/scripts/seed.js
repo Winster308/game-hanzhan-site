@@ -5,7 +5,7 @@
  */
 import { query } from '../src/db.js';
 import { hashPassword } from '../src/auth.js';
-import { config, isAdminUsername } from '../src/config.js';
+import { config } from '../src/config.js';
 import { migrate } from '../src/migrate.js';
 
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'Winster@2025';
@@ -60,8 +60,8 @@ async function seed() {
     ];
     for (const g of samples) {
       await query(
-        `INSERT INTO games (title, description, tags, cover_type, cover_url, original_url, localized_url, save_bank_enabled)
-         VALUES ($1,$2,$3,'url',$4,$5,$6,TRUE)`,
+        `INSERT INTO games (title, description, tags, cover_type, cover_url, original_url, localized_url)
+         VALUES ($1,$2,$3,'url',$4,$5,$6)`,
         [g.title, g.description, g.tags, g.coverUrl, g.originalUrl, g.localizedUrl]
       );
     }

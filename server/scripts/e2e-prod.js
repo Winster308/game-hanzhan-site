@@ -28,7 +28,7 @@ async function call(path, { method = 'GET', body, token } = {}) {
   console.log('── 3. 管理：添加游戏 + 更新日志 ──');
   const game = await call('/admin/games', { method: 'POST', token: adminToken, body: {
     title: `公网测试游戏${suffix}`, description: '端到端验证用', tags: ['测试'],
-    original_url: 'https://example.com', localized_url: 'https://example.com/cn', save_bank_enabled: true,
+    original_url: 'https://example.com', localized_url: 'https://example.com/cn',
   } });
   check('添加游戏', game.status === 201, JSON.stringify(game.data));
   const gid = game.data.id;

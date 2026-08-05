@@ -11,7 +11,7 @@ const TYPE_ICON = {
 };
 
 export default function Notifications() {
-  const { user } = useAuth();
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   const { show } = useToast();
   const [list, setList] = useState([]);
@@ -23,9 +23,10 @@ export default function Notifications() {
   }, [page]);
 
   useEffect(() => {
+    if (loading) return; // 等待 AuthContext 加载完成，避免误跳登录页
     if (!user) { navigate('/login'); return; }
     load();
-  }, [user, navigate, load]);
+  }, [user, navigate, load, loading]);
 
   const readAll = async () => {
     try {

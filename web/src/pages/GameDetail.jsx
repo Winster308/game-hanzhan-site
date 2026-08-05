@@ -45,10 +45,6 @@ export default function GameDetail() {
     setLoading(true);
     Promise.all([
       api(`/games/${id}`, { auth: !!user }).then((d) => setGame(d.game)),
-      api(`/games/${id}/comments?page=1&pageSize=20`).then((d) => {
-        setComments(d.comments);
-        setCommentTotal(d.total);
-      }),
       api(`/games/${id}/updates`, { auth: false }).then((d) => setUpdates(d.updates)).catch(() => setUpdates([])),
     ]).catch((e) => show(e.message, 'error'))
       .finally(() => setLoading(false));
@@ -264,8 +260,8 @@ export default function GameDetail() {
         </div>
       )}
 
-      {/* 存档银行 */}
-      {game.save_bank_enabled && <SaveBank gameId={game.id} />}
+      {/* 存档银行（每个游戏内置） */}
+      <SaveBank gameId={game.id} />
 
       {/* 评论区 */}
       <div className="card mt16" style={{ padding: 22 }}>

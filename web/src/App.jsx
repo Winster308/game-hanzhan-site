@@ -6,7 +6,7 @@ import { ToastProvider } from './components/Toast.jsx';
 import Home from './pages/Home.jsx';
 import GameDetail from './pages/GameDetail.jsx';
 import Leaderboard from './pages/Leaderboard.jsx';
-import Saves from './pages/Saves.jsx';
+import SubmitGame from './pages/SubmitGame.jsx';
 import Announcements from './pages/Announcements.jsx';
 import AnnouncementDetail from './pages/AnnouncementDetail.jsx';
 import Login from './pages/Login.jsx';
@@ -34,7 +34,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/games/:id" element={<GameDetail />} />
             <Route path="/leaderboard" element={<Leaderboard />} />
-            <Route path="/saves" element={<Saves />} />
+            <Route path="/submit" element={<SubmitGame />} />
             <Route path="/announcements" element={<Announcements />} />
             <Route path="/announcements/:id" element={<AnnouncementDetail />} />
             <Route path="/login" element={<Login />} />

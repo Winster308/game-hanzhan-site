@@ -7,14 +7,15 @@ export default function Comments({ show }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [editing, setEditing] = useState(null);
   const [editContent, setEditContent] = useState('');
 
   const load = useCallback(() => {
-    api(`/admin/comments?page=${page}&pageSize=15${search ? `&search=${encodeURIComponent(search)}` : ''}`)
+    api(`/admin/comments?page=${page}&pageSize=15${appliedSearch ? `&search=${encodeURIComponent(appliedSearch)}` : ''}`)
       .then((d) => { setComments(d.comments); setTotal(d.total); })
       .catch(() => {});
-  }, [page, search]);
+  }, [page, appliedSearch]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -46,8 +47,10 @@ export default function Comments({ show }) {
 
       <div className="toolbar">
         <input placeholder="搜索评论内容…" value={search}
-          onChange={(e) => setSearch(e.target.value)} style={{ width: 260 }} />
-        <button className="btn btn-ghost" onClick={() => { setPage(1); load(); }}>搜索</button>
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); setAppliedSearch(search); } }}
+          style={{ width: 260 }} />
+        <button className="btn btn-ghost" onClick={() => { setPage(1); setAppliedSearch(search); }}>搜索</button>
       </div>
 
       <div className="card table-wrap">

@@ -68,7 +68,6 @@ router.post('/register', async (req, res) => {
 
     const existing = await query('SELECT id FROM users WHERE lower(username) = lower($1) OR lower(email) = lower($2)', [username, email]);
     if (existing.length) {
-      const sameName = existing.length && String(existing[0] ? 1 : 1);
       return res.status(400).json({ error: '用户名或邮箱已被注册' });
     }
 
