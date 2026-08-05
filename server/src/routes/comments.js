@@ -12,8 +12,9 @@ const router = Router();
 router.get('/games/:id/comments', async (req, res) => {
   try {
     const gameId = Number(req.params.id);
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || 20));
+    const page = Math.floor(Number(req.query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Math.floor(Number(req.query.pageSize) || 20)));
+    if (!Number.isInteger(page) || page < 1) return res.status(400).json({ error: '参数错误' });
     const rows = await query(
       `SELECT c.id, c.game_id, c.parent_id, c.content, c.is_deleted, c.edited_at, c.created_at,
               u.id AS user_id, u.username

@@ -14,7 +14,10 @@ export default function Reports({ show }) {
 
   const load = useCallback(() => {
     api(`/admin/reports?page=${page}&pageSize=15&status=${status}`)
-      .then((d) => { setReports(d.reports); setTotal(d.total); })
+      .then((d) => {
+        setReports(d.reports); setTotal(d.total);
+        if (page > 1 && d.reports.length === 0 && d.total < (page - 1) * 15 + 1) setPage((p) => Math.max(1, p - 1));
+      })
       .catch(() => {});
   }, [page, status]);
 

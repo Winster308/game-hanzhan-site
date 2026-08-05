@@ -12,7 +12,10 @@ export default function Appeals({ show }) {
 
   const load = useCallback(() => {
     api(`/admin/appeals?page=${page}&pageSize=15&status=${status}`)
-      .then((d) => { setAppeals(d.appeals); setTotal(d.total); })
+      .then((d) => {
+        setAppeals(d.appeals); setTotal(d.total);
+        if (page > 1 && d.appeals.length === 0 && d.total < (page - 1) * 15 + 1) setPage((p) => Math.max(1, p - 1));
+      })
       .catch(() => {});
   }, [page, status]);
 

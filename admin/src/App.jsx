@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthContext.jsx';
 import Login from './pages/Login.jsx';
@@ -22,10 +22,13 @@ function Layout() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
   const show = (text, type = 'info') => {
     setToast({ text, type });
-    setTimeout(() => setToast(null), 2600);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
   };
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   const links = [
     ['/', '📊', '仪表盘'],

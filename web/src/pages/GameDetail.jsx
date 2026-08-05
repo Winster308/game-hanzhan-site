@@ -29,6 +29,7 @@ export default function GameDetail() {
   const [reportReason, setReportReason] = useState(REPORT_REASONS[0]);
   const [reportDetail, setReportDetail] = useState('');
   const [loading, setLoading] = useState(true);
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
 
   const loadGame = useCallback(() => {
     api(`/games/${id}`, { auth: !!user }).then((d) => setGame(d.game)).catch(() => {});
@@ -41,16 +42,26 @@ export default function GameDetail() {
     }).catch(() => {});
   }, [id, commentPage]);
 
+  // 切换游戏（同路由仅 params 变化）时丢弃过期响应，避免显示/操作错对象
   useEffect(() => {
+    let ignore = false;
     setLoading(true);
     Promise.all([
-      api(`/games/${id}`, { auth: !!user }).then((d) => setGame(d.game)),
-      api(`/games/${id}/updates`, { auth: false }).then((d) => setUpdates(d.updates)).catch(() => setUpdates([])),
-    ]).catch((e) => show(e.message, 'error'))
-      .finally(() => setLoading(false));
+      api(`/games/${id}`, { auth: !!user }).then((d) => { if (!ignore) setGame(d.game); }),
+      api(`/games/${id}/updates`, { auth: false }).then((d) => { if (!ignore) setUpdates(d.updates); }).catch(() => {}),
+    ]).catch((e) => { if (!ignore) show(e.message, 'error'); })
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
   }, [id, user, show]);
 
-  useEffect(() => { loadComments(); }, [loadComments]);
+  // 评论翻页时丢弃过期响应
+  useEffect(() => {
+    let ignore = false;
+    api(`/games/${id}/comments?page=${commentPage}&pageSize=20`).then((d) => {
+      if (!ignore) { setComments(d.comments); setCommentTotal(d.total); }
+    }).catch(() => {});
+    return () => { ignore = true; };
+  }, [id, commentPage]);
 
   if (loading) return <div className="spin" />;
   if (!game) return <div className="empty">游戏不存在</div>;
@@ -59,7 +70,7 @@ export default function GameDetail() {
     if (!user) return navigate('/login');
     try {
       const d = await api(`/games/${game.id}/like`, { method: 'POST' });
-      setGame({ ...game, is_liked: d.liked, likes_count: d.likes_count });
+      setGame((prev) => ({ ...prev, is_liked: d.liked, likes_count: d.likes_count }));
     } catch (e) { show(e.message, 'error'); }
   };
 
@@ -67,7 +78,7 @@ export default function GameDetail() {
     if (!user) return navigate('/login');
     try {
       const d = await api(`/games/${game.id}/favorite`, { method: 'POST' });
-      setGame({ ...game, is_favorited: d.favorited, favorites_count: d.favorites_count });
+      setGame((prev) => ({ ...prev, is_favorited: d.favorited, favorites_count: d.favorites_count }));
     } catch (e) { show(e.message, 'error'); }
   };
 
@@ -76,7 +87,7 @@ export default function GameDetail() {
     if (!user) return navigate('/login');
     try {
       const d = await api(`/games/${game.id}/rating`, { method: 'POST', body: { score } });
-      setGame({ ...game, my_rating: d.my_rating, rating_avg: d.rating_avg, rating_count: d.rating_count });
+      setGame((prev) => ({ ...prev, my_rating: d.my_rating, rating_avg: d.rating_avg, rating_count: d.rating_count }));
       show(`已评 ${score} 星`, 'ok');
     } catch (e) { show(e.message, 'error'); }
   };
@@ -84,7 +95,7 @@ export default function GameDetail() {
   const clearRating = async () => {
     try {
       const d = await api(`/games/${game.id}/rating`, { method: 'DELETE' });
-      setGame({ ...game, my_rating: null, rating_avg: d.rating_avg, rating_count: d.rating_count });
+      setGame((prev) => ({ ...prev, my_rating: null, rating_avg: d.rating_avg, rating_count: d.rating_count }));
     } catch (e) { show(e.message, 'error'); }
   };
 
@@ -92,13 +103,15 @@ export default function GameDetail() {
   const play = (url) => {
     api(`/games/${game.id}/play`, { method: 'POST', auth: false }).catch(() => {});
     window.open(url, '_blank', 'noopener');
-    setGame({ ...game, play_count: game.play_count + 1 });
+    setGame((prev) => ({ ...prev, play_count: (prev.play_count || 0) + 1 }));
   };
 
   const submitComment = async (e) => {
     e.preventDefault();
     if (!user) return navigate('/login');
+    if (commentSubmitting) return; // 防重复提交
     const isReply = !!replyingTo;
+    setCommentSubmitting(true);
     try {
       await api(`/games/${game.id}/comments`, {
         method: 'POST',
@@ -110,7 +123,7 @@ export default function GameDetail() {
       show(isReply ? '回复成功' : '评论发表成功', 'ok');
       loadGame();
       loadComments();
-    } catch (err) { show(err.message, 'error'); }
+    } catch (err) { show(err.message, 'error'); } finally { setCommentSubmitting(false); }
   };
 
   const saveEdit = async (commentId) => {
@@ -216,8 +229,14 @@ export default function GameDetail() {
           {/* 评分区 */}
           <div className="flex mt16" style={{ gap: 12, flexWrap: 'wrap' }}>
             <div>
-              <span style={{ color: '#f59e0b', fontSize: 20, letterSpacing: 2 }}>{stars(game.rating_avg)}</span>
-              <span className="small muted"> {game.rating_avg || '暂无'} / 5（{game.rating_count || 0} 人评分）</span>
+              {game.rating_avg != null ? (
+                <>
+                  <span style={{ color: '#f59e0b', fontSize: 20, letterSpacing: 2 }}>{stars(game.rating_avg)}</span>
+                  <span className="small muted"> {game.rating_avg} / 5（{game.rating_count || 0} 人评分）</span>
+                </>
+              ) : (
+                <span className="small muted">暂无评分</span>
+              )}
             </div>
             {user && (
               <div className="flex" style={{ gap: 4 }}>
@@ -286,8 +305,8 @@ export default function GameDetail() {
                 )}
                 <span className="small muted">{(replyingTo ? replyContent : newComment).length}/500</span>
               </div>
-              <button className="btn btn-sm" disabled={(replyingTo ? replyContent : newComment).trim().length < 3}>
-                {replyingTo ? '发表回复' : '发表评论'}
+              <button className="btn btn-sm" disabled={(replyingTo ? replyContent : newComment).trim().length < 3 || commentSubmitting}>
+                {commentSubmitting ? '发送中…' : (replyingTo ? '发表回复' : '发表评论')}
               </button>
             </div>
           </form>

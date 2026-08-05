@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -14,6 +14,9 @@ export default function Register() {
   const [sending, setSending] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const timerRef = useRef(null);
+
+  // 卸载时清理倒计时定时器
+  useEffect(() => () => { clearInterval(timerRef.current); }, []);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 

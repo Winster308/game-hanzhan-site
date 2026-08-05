@@ -33,23 +33,27 @@ export default function Profile() {
 
   useEffect(() => {
     if (!user) return;
+    let ignore = false;
     setLoading(true);
     const tasks = [];
-    if (tab === 'comments') tasks.push(api('/my/comments').then((d) => setComments(d.comments)).catch(() => []));
-    if (tab === 'saves') tasks.push(api('/my/saves').then((d) => setSaves(d.saves)).catch(() => []));
-    if (tab === 'reports') tasks.push(api('/reports/my').then((d) => setReports(d.reports)).catch(() => []));
-    if (tab === 'achievements') tasks.push(api('/my/achievements').then(setAch).catch(() => {}));
-    Promise.all(tasks).then(() => setLoading(false));
+    if (tab === 'comments') tasks.push(api('/my/comments').then((d) => { if (!ignore) setComments(d.comments); }).catch(() => []));
+    if (tab === 'saves') tasks.push(api('/my/saves').then((d) => { if (!ignore) setSaves(d.saves); }).catch(() => []));
+    if (tab === 'reports') tasks.push(api('/reports/my').then((d) => { if (!ignore) setReports(d.reports); }).catch(() => []));
+    if (tab === 'achievements') tasks.push(api('/my/achievements').then((d) => { if (!ignore) setAch(d); }).catch(() => {}));
+    Promise.all(tasks).then(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
   }, [tab, user]);
 
   // 收藏/点赞需要后端专用接口
   useEffect(() => {
     if (!user || (tab !== 'favorites' && tab !== 'likes')) return;
+    let ignore = false;
     setLoading(true);
     api(`/my/${tab === 'favorites' ? 'favorites' : 'likes'}`)
-      .then((d) => setGames(d.games))
-      .catch(() => setGames([]))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!ignore) setGames(d.games); })
+      .catch(() => { if (!ignore) setGames([]); })
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
   }, [tab, user]);
 
   if (!user) return null;

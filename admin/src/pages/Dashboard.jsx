@@ -3,10 +3,24 @@ import { api, formatTime } from '../api.js';
 
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
+  const [error, setError] = useState('');
 
-  useEffect(() => {
-    api('/admin/stats').then(setStats).catch(() => {});
-  }, []);
+  const load = () => {
+    setError('');
+    setStats(null);
+    api('/admin/stats').then(setStats).catch((err) => setError(err.message));
+  };
+
+  useEffect(() => { load(); }, []);
+
+  if (error) {
+    return (
+      <div className="card" style={{ padding: 40, textAlign: 'center' }}>
+        <p className="form-error" style={{ marginBottom: 12 }}>加载统计数据失败：{error}</p>
+        <button className="btn" onClick={load}>重试</button>
+      </div>
+    );
+  }
 
   if (!stats) return <div className="spin" />;
 

@@ -11,8 +11,9 @@ const router = Router();
 router.get('/games/:id/saves', async (req, res) => {
   try {
     const gameId = Number(req.params.id);
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const pageSize = Math.min(50, Math.max(1, Number(req.query.pageSize) || 15));
+    const page = Math.floor(Number(req.query.page) || 1);
+    const pageSize = Math.min(50, Math.max(1, Math.floor(Number(req.query.pageSize) || 15)));
+    if (!Number.isInteger(page) || page < 1) return res.status(400).json({ error: '参数错误' });
     const rows = await query(
       `SELECT s.id, s.game_id, s.title, s.filename, s.download_count, s.created_at,
               u.username AS uploader

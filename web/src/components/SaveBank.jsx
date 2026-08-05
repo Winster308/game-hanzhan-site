@@ -58,6 +58,7 @@ export default function SaveBank({ gameId }) {
     try {
       const d = await api(`/saves/${id}`, { auth: false });
       setViewing(d.save);
+      load(); // 后端会递增 download_count，刷新列表让计数同步
     } catch (err) { show(err.message, 'error'); }
   };
 

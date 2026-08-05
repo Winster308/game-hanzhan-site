@@ -15,7 +15,7 @@ export default function Login() {
     try {
       await login(account, password);
     } catch (err) {
-      setError(err.data?.ban_remaining_ms ? `账号已被封禁${err.data.ban_reason ? '：' + err.data.ban_reason : ''}` : err.message);
+      setError(err.data?.ban_reason ? `账号已被封禁：${err.data.ban_reason}` : err.message);
     } finally {
       setLoading(false);
     }

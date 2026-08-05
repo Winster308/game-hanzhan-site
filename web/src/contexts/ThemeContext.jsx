@@ -30,6 +30,19 @@ export function ThemeProvider({ children }) {
     return () => mq.removeEventListener('change', handler);
   }, [theme]);
 
+  // 登录后应用账号主题（AuthContext 触发 ghz:theme-user 事件）
+  useEffect(() => {
+    const onUserTheme = (e) => {
+      const t = e.detail;
+      if (['light', 'dark', 'system'].includes(t)) {
+        setThemeState(t);
+        localStorage.setItem(THEME_KEY, t);
+      }
+    };
+    window.addEventListener('ghz:theme-user', onUserTheme);
+    return () => window.removeEventListener('ghz:theme-user', onUserTheme);
+  }, []);
+
   const setTheme = async (t) => {
     setThemeState(t);
     localStorage.setItem(THEME_KEY, t);

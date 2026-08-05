@@ -13,7 +13,10 @@ export default function Saves({ show }) {
 
   const load = useCallback(() => {
     api(`/admin/saves?page=${page}&pageSize=15&status=${status}`)
-      .then((d) => { setSaves(d.saves); setTotal(d.total); })
+      .then((d) => {
+        setSaves(d.saves); setTotal(d.total);
+        if (page > 1 && d.saves.length === 0 && d.total < (page - 1) * 15 + 1) setPage((p) => Math.max(1, p - 1));
+      })
       .catch(() => {});
   }, [page, status]);
 
@@ -116,8 +119,10 @@ export default function Saves({ show }) {
               {viewing.status === 'pending' && (
                 <>
                   <button className="btn btn-green" onClick={async () => {
-                    await api(`/admin/saves/${viewing.id}`, { method: 'PUT', body: { action: 'approve' } });
-                    show('已通过', 'ok'); setViewing(null); load();
+                    try {
+                      await api(`/admin/saves/${viewing.id}`, { method: 'PUT', body: { action: 'approve' } });
+                      show('已通过', 'ok'); setViewing(null); load();
+                    } catch (err) { show(err.message, 'error'); }
                   }}>通过</button>
                   <button className="btn btn-red" onClick={() => { setRejecting(viewing); setViewing(null); }}>驳回</button>
                 </>

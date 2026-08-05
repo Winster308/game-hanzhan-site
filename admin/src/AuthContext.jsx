@@ -22,6 +22,13 @@ export function AuthProvider({ children }) {
       .finally(() => setLoading(false));
   }, []);
 
+  // 任意接口返回 401（token 过期/被撤销）→ 全局登出
+  useEffect(() => {
+    const onUnauthorized = () => { setToken(null); setUser(null); };
+    window.addEventListener('ghz:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('ghz:unauthorized', onUnauthorized);
+  }, []);
+
   const login = async (account, password) => {
     const data = await api('/auth/login', { method: 'POST', body: { account, password } });
     if (data.user?.role !== 'admin') {

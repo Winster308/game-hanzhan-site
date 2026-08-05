@@ -16,6 +16,11 @@ export function AuthProvider({ children }) {
     try {
       const { user } = await api('/auth/me');
       setUser(user);
+      // 登录后应用账号主题（跨设备一致）
+      if (user?.theme) {
+        localStorage.setItem('ghz_theme', user.theme);
+        window.dispatchEvent(new CustomEvent('ghz:theme-user', { detail: user.theme }));
+      }
     } catch {
       setToken(null);
       setUser(null);
@@ -25,6 +30,13 @@ export function AuthProvider({ children }) {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // 任意接口返回 401（token 过期/被撤销）→ 全局登出
+  useEffect(() => {
+    const onUnauthorized = () => { setToken(null); setUser(null); };
+    window.addEventListener('ghz:unauthorized', onUnauthorized);
+    return () => window.removeEventListener('ghz:unauthorized', onUnauthorized);
+  }, []);
 
   const login = async (account, password) => {
     const data = await api('/auth/login', { method: 'POST', body: { account, password } });

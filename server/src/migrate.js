@@ -7,6 +7,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migrationsDir = path.join(__dirname, '..', 'migrations');
 
 export async function migrate() {
+  // 咨询锁串行化迁移：多实例（Railway 多副本）同时启动时避免并发执行 ALTER TABLE 冲突
+  const lockClient = await pool.connect();
+  try {
+    await lockClient.query('SELECT pg_advisory_lock($1)', [0x6A6D6967]);
+    await migrateLocked();
+  } finally {
+    await lockClient.query('SELECT pg_advisory_unlock($1)', [0x6A6D6967]).catch(() => {});
+    lockClient.release();
+  }
+}
+
+async function migrateLocked() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       name TEXT PRIMARY KEY,

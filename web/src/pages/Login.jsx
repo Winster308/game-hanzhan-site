@@ -21,8 +21,8 @@ export default function Login() {
       show('登录成功', 'ok');
       navigate('/');
     } catch (err) {
-      if (err.status === 403 && err.data?.ban_remaining_ms) {
-        setError(`账号已被封禁${err.data.ban_reason ? '：' + err.data.ban_reason : ''}`);
+      if (err.status === 403 && err.data?.ban_reason) {
+        setError(`账号已被封禁：${err.data.ban_reason}`);
       } else {
         setError(err.message);
       }

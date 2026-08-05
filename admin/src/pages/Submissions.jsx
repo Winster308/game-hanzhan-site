@@ -13,7 +13,10 @@ export default function Submissions({ show }) {
 
   const load = useCallback(() => {
     api(`/admin/submissions?page=${page}&pageSize=15&status=${status}`)
-      .then((d) => { setSubmissions(d.submissions); setTotal(d.total); })
+      .then((d) => {
+        setSubmissions(d.submissions); setTotal(d.total);
+        if (page > 1 && d.submissions.length === 0 && d.total < (page - 1) * 15 + 1) setPage((p) => Math.max(1, p - 1));
+      })
       .catch(() => {});
   }, [page, status]);
 
@@ -133,8 +136,10 @@ export default function Submissions({ show }) {
               {viewing.status === 'pending' && (
                 <>
                   <button className="btn btn-green" onClick={async () => {
-                    await api(`/admin/submissions/${viewing.id}`, { method: 'PUT', body: { action: 'approve' } });
-                    show('已通过并上架', 'ok'); setViewing(null); load();
+                    try {
+                      await api(`/admin/submissions/${viewing.id}`, { method: 'PUT', body: { action: 'approve' } });
+                      show('已通过并上架', 'ok'); setViewing(null); load();
+                    } catch (err) { show(err.message, 'error'); }
                   }}>通过并上架</button>
                   <button className="btn btn-red" onClick={() => { setRejecting(viewing); setViewing(null); }}>驳回</button>
                 </>

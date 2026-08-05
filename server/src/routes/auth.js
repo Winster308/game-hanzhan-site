@@ -3,6 +3,7 @@ import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import {
   hashPassword, verifyPassword, signToken, randomToken, getClientIp,
+  requireAuth, assertNotBanned,
 } from '../auth.js';
 import { config, isAdminUsername } from '../config.js';
 import { sendMail, mailTemplate } from '../mail.js';
@@ -160,10 +161,18 @@ router.post('/login', async (req, res) => {
     }
 
     const rows = await query(
-      'SELECT * FROM users WHERE lower(username) = lower($1) OR lower(email) = lower($1)',
+      'SELECT * FROM users WHERE lower(username) = lower($1) ORDER BY id LIMIT 1',
       [String(account).trim()]
     );
-    const user = rows[0];
+    let user = rows[0];
+    // 用户名未命中时尝试按邮箱匹配（分开查询保证确定性）
+    if (!user) {
+      const byEmail = await query(
+        'SELECT * FROM users WHERE lower(email) = lower($1) ORDER BY id LIMIT 1',
+        [String(account).trim()]
+      );
+      user = byEmail[0];
+    }
     if (!user || !(await verifyPassword(password, user.password_hash))) {
       if (user) {
         await query('INSERT INTO login_logs (user_id, ip, user_agent, success) VALUES ($1,$2,$3,FALSE)',
@@ -215,7 +224,7 @@ router.post('/verify-email', async (req, res) => {
   try {
     const { token } = req.body || {};
     if (!token) return res.status(400).json({ error: '缺少令牌' });
-    const tokenHash = require('node:crypto').createHash('sha256').update(token).digest('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const rows = await query(
       `SELECT t.*, u.username, u.email FROM email_tokens t
        JOIN users u ON u.id = t.user_id
@@ -281,7 +290,7 @@ router.post('/reset-password', async (req, res) => {
     const pwdErr = validatePassword(newPassword);
     if (pwdErr) return res.status(400).json({ error: pwdErr });
     if (!token) return res.status(400).json({ error: '缺少令牌' });
-    const tokenHash = require('node:crypto').createHash('sha256').update(token).digest('hex');
+    const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
     const rows = await query(
       `SELECT * FROM email_tokens WHERE token_hash = $1 AND kind = 'reset' AND used = FALSE AND expires_at > now()`,
       [tokenHash]
@@ -300,9 +309,8 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // ── 修改密码（登录后，每月一次） ──────────────────────
-router.post('/change-password', async (req, res) => {
+router.post('/change-password', requireAuth, assertNotBanned, async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ error: '请先登录' });
     const { oldPassword, newPassword } = req.body || {};
     const pwdErr = validatePassword(newPassword);
     if (pwdErr) return res.status(400).json({ error: pwdErr });
@@ -332,9 +340,8 @@ router.post('/change-password', async (req, res) => {
 });
 
 // ── 发送"修改邮箱"验证码（登录后） ───────────────────
-router.post('/send-change-email-code', async (req, res) => {
+router.post('/send-change-email-code', requireAuth, assertNotBanned, async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ error: '请先登录' });
     const newEmail = String((req.body || {}).newEmail || '').toLowerCase().trim();
     if (!EMAIL_RE.test(newEmail)) return res.status(400).json({ error: '邮箱格式不正确' });
 
@@ -370,9 +377,8 @@ router.post('/send-change-email-code', async (req, res) => {
 });
 
 // ── 修改邮箱（登录后，需新邮箱验证码；管理员豁免每月限制） ──
-router.post('/change-email', async (req, res) => {
+router.post('/change-email', requireAuth, assertNotBanned, async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ error: '请先登录' });
     const { newEmail: rawNew, code } = req.body || {};
     const newEmail = String(rawNew || '').toLowerCase().trim();
     if (!EMAIL_RE.test(newEmail)) return res.status(400).json({ error: '邮箱格式不正确' });
@@ -421,9 +427,8 @@ router.post('/change-email', async (req, res) => {
 });
 
 // ── 修改昵称（登录后，每月一次） ──────────────────────
-router.post('/change-username', async (req, res) => {
+router.post('/change-username', requireAuth, assertNotBanned, async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ error: '请先登录' });
     const { newUsername } = req.body || {};
     if (!USERNAME_RE.test(String(newUsername || ''))) {
       return res.status(400).json({ error: '用户名需为 3-32 位字母/数字/下划线/中文' });
@@ -445,16 +450,17 @@ router.post('/change-username', async (req, res) => {
     const dup = await query('SELECT id FROM users WHERE lower(username) = $1 AND id <> $2', [String(newUsername).toLowerCase(), user.id]);
     if (dup.length) return res.status(400).json({ error: '该昵称已被使用' });
     await query('UPDATE users SET username = $1, last_username_change_at = now() WHERE id = $2', [newUsername, user.id]);
-    res.json({ ok: true, message: '昵称修改成功', username: newUsername });
+    // 重新签发 token（JWT 内含 username，用于通知文案等），前端保存后立即可见新昵称
+    const fresh = await loadUser(user.id);
+    res.json({ ok: true, message: '昵称修改成功', username: newUsername, token: signToken(fresh) });
   } catch (err) {
     res.status(500).json({ error: '服务器错误' });
   }
 });
 
 // ── 主题设置 ──────────────────────────────────────────
-router.put('/theme', async (req, res) => {
+router.put('/theme', requireAuth, assertNotBanned, async (req, res) => {
   try {
-    if (!req.user) return res.status(401).json({ error: '请先登录' });
     const { theme } = req.body || {};
     if (!['light', 'dark', 'system'].includes(theme)) return res.status(400).json({ error: '主题不合法' });
     await query('UPDATE users SET theme = $1 WHERE id = $2', [theme, req.user.id]);

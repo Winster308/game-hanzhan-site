@@ -6,6 +6,7 @@ import { authMiddleware, getClientIp, hashPassword } from './auth.js';
 import { query } from './db.js';
 import { recordVisit } from './utils.js';
 import { enrichCountry } from './geo.js';
+import { rateLimit } from './ratelimit.js';
 
 import authRoutes from './routes/auth.js';
 import gamesRoutes from './routes/games.js';
@@ -40,7 +41,10 @@ app.use(authMiddleware);
 // 页面访问统计（用户端每次加载页面调用一次，按 IP 去重；异步补地区信息）
 app.post('/api/visit', (req, res) => {
   const ip = getClientIp(req);
-  recordVisit(ip, req.user?.id || null, req.get('referer') || null);
+  // 限流：每 IP 每分钟最多 30 次，防止刷爆 visit_logs 与外部 IP 归属 API
+  const rl = rateLimit({ key: `visit:${ip || 'unknown'}`, limit: 30, windowMs: 60 * 1000 });
+  if (!rl.allowed) return res.status(429).json({ ok: false, error: '访问过于频繁' });
+  recordVisit(ip, req.user?.id || null, req.get('referer') || null).catch(() => {});
   if (ip) enrichCountry(ip).catch(() => {});
   res.json({ ok: true });
 });

@@ -32,7 +32,7 @@ export default function SubmitGame() {
     if (file.size > 5 * 1024 * 1024) return show('图片不能超过 5MB', 'error');
     const reader = new FileReader();
     reader.onload = () => {
-      setForm({ ...form, cover_type: 'upload', cover_url: '' });
+      setForm((prev) => ({ ...prev, cover_type: 'upload', cover_url: '' }));
       setCoverPreview(String(reader.result));
     };
     reader.readAsDataURL(file);
@@ -58,7 +58,8 @@ export default function SubmitGame() {
     } catch (err) { show(err.message, 'error'); } finally { setSubmitting(false); }
   };
 
-  if (!user) return null;
+  if (loading) return null; // 等待 AuthContext 加载完成，避免白屏
+  if (!user) return null; // 未登录由 effect 跳转登录页
 
   return (
     <div className="container" style={{ maxWidth: 860 }}>

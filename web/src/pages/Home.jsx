@@ -17,10 +17,13 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let ignore = false;
+    setLoading(true);
     api(`/games?page=${page}&pageSize=24&sort=${sort}${search ? `&search=${encodeURIComponent(search)}` : ''}${tag ? `&tag=${encodeURIComponent(tag)}` : ''}`, { auth: false })
-      .then((d) => { setGames(d.games); setTotal(d.total); })
-      .catch(() => setGames([]))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!ignore) { setGames(d.games); setTotal(d.total); } })
+      .catch(() => { if (!ignore) setGames([]); }) // 失败时保留旧数据并提示由 UI 兜底
+      .finally(() => { if (!ignore) setLoading(false); });
+    return () => { ignore = true; };
   }, [page, sort, search, tag]);
 
   useEffect(() => {

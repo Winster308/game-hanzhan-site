@@ -13,7 +13,10 @@ export default function Comments({ show }) {
 
   const load = useCallback(() => {
     api(`/admin/comments?page=${page}&pageSize=15${appliedSearch ? `&search=${encodeURIComponent(appliedSearch)}` : ''}`)
-      .then((d) => { setComments(d.comments); setTotal(d.total); })
+      .then((d) => {
+        setComments(d.comments); setTotal(d.total);
+        if (page > 1 && d.comments.length === 0 && d.total < (page - 1) * 15 + 1) setPage((p) => Math.max(1, p - 1));
+      })
       .catch(() => {});
   }, [page, appliedSearch]);
 

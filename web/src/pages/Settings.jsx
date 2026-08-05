@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { api, formatTime, formatRemaining } from '../api.js';
+import { api, formatTime, formatRemaining, setToken } from '../api.js';
 import { useAuth } from '../contexts/AuthContext.jsx';
 import { useTheme } from '../contexts/ThemeContext.jsx';
 import { useToast } from '../components/Toast.jsx';
@@ -21,6 +21,8 @@ export default function Settings() {
   const [passwords, setPasswords] = useState({ old: '', next: '', confirm: '' });
   const [msg, setMsg] = useState({});
 
+  useEffect(() => () => { clearInterval(emailTimerRef.current); }, []);
+
   useEffect(() => {
     if (loading) return; // 等待 AuthContext 加载完成，避免误跳登录页
     if (!user) { navigate('/login'); return; }
@@ -34,7 +36,9 @@ export default function Settings() {
   const doChangeUsername = async (e) => {
     e.preventDefault();
     try {
-      await api('/auth/change-username', { method: 'POST', body: { newUsername: username } });
+      const d = await api('/auth/change-username', { method: 'POST', body: { newUsername: username } });
+      // 后端重新签发了含新用户名的 token，立即保存避免旧 token 内昵称不更新
+      if (d.token) setToken(d.token);
       setMsg({ ...msg, username: '昵称修改成功，下次修改需等待 30 天' });
       refresh();
     } catch (err) { setMsg({ ...msg, username: err.message }); }

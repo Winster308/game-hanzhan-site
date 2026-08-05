@@ -26,8 +26,9 @@ function gameSelect(userId) {
 router.get('/', async (req, res) => {
   try {
     const { search = '', tag = '', sort = 'latest' } = req.query;
-    const page = Math.max(1, Number(req.query.page) || 1);
-    const pageSize = Math.min(60, Math.max(1, Number(req.query.pageSize) || 24));
+    const page = Math.floor(Number(req.query.page) || 1);
+    const pageSize = Math.min(60, Math.max(1, Math.floor(Number(req.query.pageSize) || 24)));
+    if (!Number.isInteger(page) || page < 1) return res.status(400).json({ error: '参数错误' });
 
     const where = [];
     const params = [];
@@ -76,7 +77,7 @@ router.get('/tags', async (req, res) => {
 // ── 排行榜（按分数实时排序） ──────────────────────────
 router.get('/leaderboard', async (req, res) => {
   try {
-    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+    const limit = Math.min(100, Math.max(1, Math.floor(Number(req.query.limit) || 20)));
     const rows = await query(
       `${gameSelect(req.user?.id)} ORDER BY score DESC, g.id ASC LIMIT $1`,
       [limit]
@@ -110,16 +111,19 @@ router.post('/:id/like', requireAuth, async (req, res) => {
     if (ban.banned) return res.status(403).json({ error: `账号已被封禁${ban.reason ? '：' + ban.reason : ''}` });
 
     const result = await withTransaction(async (client) => {
-      const existing = await client.query('SELECT 1 FROM likes WHERE user_id = $1 AND game_id = $2', [req.user.id, id]);
+      // 先插入（幂等），用 rowCount 判断是新增还是取消，避免并发时计数虚高/双重扣减
+      const ins = await client.query(
+        'INSERT INTO likes (user_id, game_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING 1',
+        [req.user.id, id]
+      );
       let liked;
-      if (existing.rows.length) {
+      if (ins.rowCount) {
+        await client.query('UPDATE games SET likes_count = likes_count + 1 WHERE id = $1', [id]);
+        liked = true;
+      } else {
         await client.query('DELETE FROM likes WHERE user_id = $1 AND game_id = $2', [req.user.id, id]);
         await client.query('UPDATE games SET likes_count = GREATEST(0, likes_count - 1) WHERE id = $1', [id]);
         liked = false;
-      } else {
-        await client.query('INSERT INTO likes (user_id, game_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, id]);
-        await client.query('UPDATE games SET likes_count = likes_count + 1 WHERE id = $1', [id]);
-        liked = true;
       }
       const updated = await client.query('SELECT likes_count FROM games WHERE id = $1', [id]);
       return { liked, likes_count: updated.rows[0].likes_count };
@@ -142,16 +146,19 @@ router.post('/:id/favorite', requireAuth, async (req, res) => {
     if (ban.banned) return res.status(403).json({ error: `账号已被封禁${ban.reason ? '：' + ban.reason : ''}` });
 
     const result = await withTransaction(async (client) => {
-      const existing = await client.query('SELECT 1 FROM favorites WHERE user_id = $1 AND game_id = $2', [req.user.id, id]);
+      // 同点赞：先插入（幂等），用 rowCount 判断新增/取消，避免并发计数错误
+      const ins = await client.query(
+        'INSERT INTO favorites (user_id, game_id) VALUES ($1,$2) ON CONFLICT DO NOTHING RETURNING 1',
+        [req.user.id, id]
+      );
       let favorited;
-      if (existing.rows.length) {
+      if (ins.rowCount) {
+        await client.query('UPDATE games SET favorites_count = favorites_count + 1 WHERE id = $1', [id]);
+        favorited = true;
+      } else {
         await client.query('DELETE FROM favorites WHERE user_id = $1 AND game_id = $2', [req.user.id, id]);
         await client.query('UPDATE games SET favorites_count = GREATEST(0, favorites_count - 1) WHERE id = $1', [id]);
         favorited = false;
-      } else {
-        await client.query('INSERT INTO favorites (user_id, game_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, id]);
-        await client.query('UPDATE games SET favorites_count = favorites_count + 1 WHERE id = $1', [id]);
-        favorited = true;
       }
       const updated = await client.query('SELECT favorites_count FROM games WHERE id = $1', [id]);
       return { favorited, favorites_count: updated.rows[0].favorites_count };
@@ -168,10 +175,14 @@ router.post('/:id/favorite', requireAuth, async (req, res) => {
 router.post('/:id/play', async (req, res) => {
   try {
     const id = Number(req.params.id);
+    // 限流：每 IP 每分钟最多 20 次，防脚本刷排行榜分数
+    const ip = getClientIp(req) || 'unknown';
+    const rl = rateLimit({ key: `play:${ip}:${id}`, limit: 20, windowMs: 60 * 1000 });
+    if (!rl.allowed) return res.status(429).json({ error: '操作过于频繁，请稍后再试' });
     const rows = await query('UPDATE games SET play_count = play_count + 1 WHERE id = $1 RETURNING play_count', [id]);
     if (!rows.length) return res.status(404).json({ error: '游戏不存在' });
     // 顺带记录访问 + 登录用户的游玩记录（成就用）
-    recordVisit(getClientIp(req), req.user?.id || null);
+    recordVisit(getClientIp(req), req.user?.id || null).catch(() => {});
     if (req.user) {
       query('INSERT INTO play_logs (user_id, game_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.user.id, id])
         .then(() => checkAchievements(req.user.id))

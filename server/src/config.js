@@ -1,6 +1,16 @@
 import dotenv from 'dotenv';
 dotenv.config();
 
+// 生产环境安全校验：缺少强密钥/管理员密码时拒绝启动，避免用公开默认值上线
+if (process.env.NODE_ENV === 'production') {
+  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
+    throw new Error('生产环境必须设置 JWT_SECRET（至少 16 字符随机串）');
+  }
+  if (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD.length < 8) {
+    throw new Error('生产环境必须设置 ADMIN_PASSWORD（至少 8 字符随机密码）');
+  }
+}
+
 export const config = {
   port: Number(process.env.PORT || 3001),
   databaseUrl: process.env.DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/game_hanzhan',

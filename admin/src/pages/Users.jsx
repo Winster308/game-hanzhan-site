@@ -13,7 +13,10 @@ export default function Users({ show }) {
 
   const load = useCallback(() => {
     api(`/admin/users?page=${page}&pageSize=15${appliedSearch ? `&search=${encodeURIComponent(appliedSearch)}` : ''}`)
-      .then((d) => { setUsers(d.users); setTotal(d.total); })
+      .then((d) => {
+        setUsers(d.users); setTotal(d.total);
+        if (page > 1 && d.users.length === 0 && d.total < (page - 1) * 15 + 1) setPage((p) => Math.max(1, p - 1));
+      })
       .catch(() => {});
   }, [page, appliedSearch]);
 

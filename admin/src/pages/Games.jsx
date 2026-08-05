@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, formatTime } from '../api.js';
 import Pagination from '../components/Pagination.jsx';
 
@@ -12,6 +12,7 @@ export default function Games({ show }) {
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [appliedSearch, setAppliedSearch] = useState('');
   const [editing, setEditing] = useState(null); // null | 'new' | 游戏对象
   const [form, setForm] = useState(EMPTY_FORM);
   const [coverPreview, setCoverPreview] = useState('');
@@ -19,16 +20,23 @@ export default function Games({ show }) {
   // 更新日志管理
   const [updates, setUpdates] = useState([]);
   const [updateForm, setUpdateForm] = useState({ version: '', content: '' });
+  const updatesSeqRef = useRef(0);
 
   const load = useCallback(() => {
-    api(`/admin/games?page=${page}&pageSize=15${search ? `&search=${encodeURIComponent(search)}` : ''}`)
-      .then((d) => { setGames(d.games); setTotal(d.total); })
+    api(`/admin/games?page=${page}&pageSize=15${appliedSearch ? `&search=${encodeURIComponent(appliedSearch)}` : ''}`)
+      .then((d) => {
+        setGames(d.games); setTotal(d.total);
+        // 删除末页最后一条后页码回退，避免停留在空页
+        if (page > 1 && d.games.length === 0 && d.total < (page - 1) * 15 + 1) {
+          setPage((p) => Math.max(1, p - 1));
+        }
+      })
       .catch(() => {});
-  }, [page, search]);
+  }, [page, appliedSearch]);
 
   useEffect(() => { load(); }, [load]);
 
-  const openEdit = (g) => {
+  const openEdit = async (g) => {
     if (!g) {
       setForm(EMPTY_FORM);
       setCoverPreview('');
@@ -41,10 +49,19 @@ export default function Games({ show }) {
       original_url: g.original_url, localized_url: g.localized_url,
       cover_type: g.cover_type, cover_url: g.cover_url || '',
     });
-    setCoverPreview(g.cover_type === 'upload' ? g.cover_data : (g.cover_url || ''));
+    // 上传封面的游戏：列表接口不含 cover_data，编辑时拉详情回显（否则保存必失败）
+    if (g.cover_type === 'upload') {
+      try {
+        const d = await api(`/admin/games/${g.id}`);
+        setCoverPreview(d.game.cover_data || '');
+      } catch { setCoverPreview(''); }
+    } else {
+      setCoverPreview(g.cover_url || '');
+    }
     setEditing(g);
-    // 加载更新日志
-    api(`/admin/games/${g.id}/updates`).then((d) => setUpdates(d.updates)).catch(() => setUpdates([]));
+    // 加载更新日志（请求序号防竞态：快速切换游戏时丢弃过期响应）
+    const seq = ++updatesSeqRef.current;
+    api(`/admin/games/${g.id}/updates`).then((d) => { if (updatesSeqRef.current === seq) setUpdates(d.updates); }).catch(() => { if (updatesSeqRef.current === seq) setUpdates([]); });
     setUpdateForm({ version: '', content: '' });
   };
 
@@ -56,7 +73,7 @@ export default function Games({ show }) {
     if (file.size > 5 * 1024 * 1024) return show('图片不能超过 5MB', 'error');
     const reader = new FileReader();
     reader.onload = () => {
-      setForm({ ...form, cover_type: 'upload', cover_url: '' });
+      setForm((prev) => ({ ...prev, cover_type: 'upload', cover_url: '' }));
       setCoverPreview(String(reader.result));
     };
     reader.readAsDataURL(file);
@@ -101,8 +118,10 @@ export default function Games({ show }) {
 
       <div className="toolbar">
         <input placeholder="搜索游戏标题 / 标签…" value={search}
-          onChange={(e) => setSearch(e.target.value)} style={{ width: 260 }} />
-        <button className="btn btn-ghost" onClick={() => { setPage(1); load(); }}>搜索</button>
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { setPage(1); setAppliedSearch(search.trim()); } }}
+          style={{ width: 260 }} />
+        <button className="btn btn-ghost" onClick={() => { setPage(1); setAppliedSearch(search.trim()); }}>搜索</button>
       </div>
 
       <div className="card table-wrap">

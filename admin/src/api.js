@@ -20,6 +20,16 @@ export async function api(path, { method = 'GET', body, auth = true } = {}) {
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  // token 过期/无效：统一清除并通知全局登出，由 AuthContext 处理。
+  // 排除 auth 类接口：登录失败返回 401 属正常业务，不应触发登出。
+  if (res.status === 401 && auth && !path.startsWith('/auth/')) {
+    localStorage.removeItem(TOKEN_KEY);
+    window.dispatchEvent(new CustomEvent('ghz:unauthorized'));
+    const err = new Error('登录已过期，请重新登录');
+    err.status = 401;
+    err.data = { error: '登录已过期，请重新登录' };
+    throw err;
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(data.error || `请求失败 (${res.status})`);

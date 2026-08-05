@@ -8,6 +8,7 @@ export default function VerifyEmail() {
   const [state, setState] = useState('loading'); // loading | ok | fail
 
   useEffect(() => {
+    if (!token) { setState('fail'); return; } // 无 token 直接判定失败，不发无意义请求
     api('/auth/verify-email', { method: 'POST', body: { token } })
       .then(() => setState('ok'))
       .catch(() => setState('fail'));

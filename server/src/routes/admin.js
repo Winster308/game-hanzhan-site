@@ -10,10 +10,21 @@ import { validateGameBody } from '../game-validation.js';
 const router = Router();
 router.use(requireAdmin);
 
-/** 通用分页参数 */
+/** 解析公告过期时间；非法日期返回 null（不设过期） */
+function parseExpiresAt(v) {
+  if (!v) return null;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** 通用分页参数（非法/浮点值回退默认，防止 LIMIT 报错） */
 function pagination(req, defaultSize = 20) {
-  const page = Math.max(1, Number(req.query.page) || 1);
-  const pageSize = Math.min(100, Math.max(1, Number(req.query.pageSize) || defaultSize));
+  const rawPage = Number(req.query.page);
+  const page = Number.isFinite(rawPage) && Number.isInteger(rawPage) && rawPage > 0 ? rawPage : 1;
+  const rawSize = Number(req.query.pageSize);
+  const pageSize = Number.isFinite(rawSize) && Number.isInteger(rawSize) && rawSize > 0
+    ? Math.min(100, rawSize)
+    : defaultSize;
   return { page, pageSize, offset: (page - 1) * pageSize };
 }
 
@@ -136,6 +147,19 @@ router.get('/games', async (req, res) => {
     const total = await query(`SELECT COUNT(*)::int AS c FROM games ${where}`, params);
     res.json({ games: rows, total: total[0].c, page, pageSize });
   } catch (err) {
+    res.status(500).json({ error: '服务器错误' });
+  }
+});
+
+/** 游戏详情（含 cover_data，供编辑回显上传封面） */
+router.get('/games/:id', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const rows = await query('SELECT * FROM games WHERE id = $1', [id]);
+    if (!rows.length) return res.status(404).json({ error: '游戏不存在' });
+    res.json({ game: rows[0] });
+  } catch (err) {
+    console.error('[admin/games/detail]', err);
     res.status(500).json({ error: '服务器错误' });
   }
 });
@@ -462,7 +486,7 @@ router.put('/reports/:id', async (req, res) => {
           return { error: '不能封禁管理员，请手动处理' };
         }
         const banUntil = permanent ? 'infinity'
-          : new Date(Date.now() + Math.min(Number(ban_hours) || 24, 365 * 24) * 3600 * 1000);
+          : new Date(Date.now() + Math.min(Math.max(Number(ban_hours) || 24, 1), 365 * 24) * 3600 * 1000);
         await client.query(
           'UPDATE users SET banned_until = $1, ban_reason = $2 WHERE id = $3',
           [banUntil, banReason, targetUserId]
@@ -706,7 +730,7 @@ router.post('/announcements', async (req, res) => {
     const rows = await query(
       `INSERT INTO announcements (title, content, is_pinned, expires_at, created_by)
        VALUES ($1,$2,$3,$4,$5) RETURNING id`,
-      [t, c, Boolean(is_pinned), expires_at ? new Date(expires_at) : null, req.user.id]
+      [t, c, Boolean(is_pinned), parseExpiresAt(expires_at), req.user.id]
     );
     await audit(req.user.id, 'announcement.create', 'announcement', rows[0].id, { title: t });
     notifyAll('announcement', `新公告：${t}`, c.slice(0, 80), `/announcements/${rows[0].id}`);
@@ -728,7 +752,7 @@ router.put('/announcements/:id', async (req, res) => {
     const rows = await query(
       `UPDATE announcements SET title=$1, content=$2, is_pinned=$3, expires_at=$4, updated_at=now()
        WHERE id=$5 RETURNING id`,
-      [t, c, Boolean(is_pinned), expires_at ? new Date(expires_at) : null, id]
+      [t, c, Boolean(is_pinned), parseExpiresAt(expires_at), id]
     );
     if (!rows.length) return res.status(404).json({ error: '公告不存在' });
     await audit(req.user.id, 'announcement.update', 'announcement', id, { title: t });
